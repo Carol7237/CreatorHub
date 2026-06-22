@@ -38,6 +38,8 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
 - PostgreSQL **16** în Docker (`docker-compose.yml`) — pe host portul **5433**
   (mapat la 5432 din container), HTTP pe **8081** (vezi §7 pentru de ce)
 - Model de date: 7 entități JPA + 2 enum-uri (vezi §8)
+- Backend: repository + DTO + mapper + service layer + excepții (vezi §9). Fără
+  controllere încă (Faza Views).
 - Build tool: Maven (NU Gradle)
 
 ## 3. Reguli de lucru (valabile pentru tot proiectul)
@@ -86,10 +88,15 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   `Tag`) + 2 enum-uri (`Role`, `SubStatus`) în `com.creatorhub.model[.enums]`.
   Verificat: Hibernate a generat 8 tabele (cele 7 + `post_tags`) și 10 FK-uri,
   aplicația pornește verde (`Started CreatorHubApplication`).
-- [ ] **Faza 2 (următoarea) — Repository-uri** (Spring Data JPA), apoi servicii,
-  controllere REST, validare & handler global de erori, autentificare
-  (Spring Security — abia în faza ei), apoi spargerea în microservicii,
-  cache Redis, MongoDB, monitorizare, frontend React.
+- [x] **Faza 2 — CRUD + Service layer + Exception handling (COMPLETĂ, 2026-06-23):**
+  7 repository-uri Spring Data JPA, 14 DTO-uri (Request/Response) + 7 mappere
+  manuale (`dto.mapper`), 7 service-uri (interfață + impl în `service.impl`) cu
+  reguli de business și `@Transactional`, ierarhie de 4 excepții (+ bază). Fără
+  controllere încă (vin la Faza Views). Verificat: `./mvnw clean compile` verde
+  și **9 teste de integrare** trec (`Phase2ServiceFlowTests`). Detalii în §9.
+- [ ] **Faza 3 (următoarea) — Views / REST:** controllere REST, Bean Validation
+  pe DTO-uri, `@RestControllerAdvice` global (mapează excepțiile la coduri HTTP),
+  apoi Security, microservicii, cache Redis, MongoDB, monitorizare, React.
 
 ## 6. Comenzi utile
 
@@ -151,3 +158,53 @@ Descrierea completă (entități + relații) e în `README.md` → secțiunea *D
     **fără cascade** — ștergerea creatorului/fanului se va trata explicit în
     business logic (faze viitoare), ca să nu cascadăm orbește peste entități
     referite în altă parte. *(De confirmat când ajungem la ștergeri reale.)*
+
+## 9. Service layer & exception handling (Faza 2)
+
+Arhitectură: **Service → Repository → Entity**. Controllerele NU există încă
+(Faza Views). Service-urile: `@Service @Transactional`, citirile cu
+`@Transactional(readOnly = true)`, injecție prin constructor (`@RequiredArgsConstructor`),
+maparea entity↔DTO în mappere statice (`com.creatorhub.dto.mapper`). DTO-urile
+sunt plate (ids + reprezentări minime). **`UserResponse` nu conține NICIODATĂ
+password.**
+
+### Ierarhia de excepții → cod HTTP intenționat (mapate la Faza Views)
+
+Rădăcină: `CreatorHubException` (abstractă) → toate moștenesc din ea.
+
+| Excepție | Cod HTTP | Când |
+|---|---|---|
+| `ResourceNotFoundException` | **404** | entitate inexistentă după id/cheie (toate find/update/delete) |
+| `DuplicateResourceException` | **409** | username/email/nume tag duplicat; a 2-a abonare ACTIVE la același tier |
+| `ResourceInUseException` | **409** | ștergere blocată de dependențe (user cu tiers/posts/comments/subs; tier cu subs/posts; tag folosit de postări) |
+| `BusinessRuleException` | **400** | reguli de business pe date (post premium fără tier, post free cu tier, preț ≤ 0, auto-abonare, tier-ul altui creator, tag gol) |
+
+### Reguli de business implementate
+
+- **User.create:** username & email unice (altfel `Duplicate`); creează automat
+  `Profile` (displayName = cel din request sau, implicit, username); rol implicit
+  `USER`.
+- **User.delete (decizie — varianta sigură):** dacă userul are tiers/posts/
+  comments/subscriptions → `ResourceInUseException` (NU ștergere oarbă). Doar
+  `Profile` cade în cascadă. Ștergerea conținutului în cascadă explicită se poate
+  adăuga ulterior dacă se dorește.
+- **SubscriptionTier.create/update:** `priceMonthly > 0` (altfel `BusinessRule`);
+  creatorul e imutabil la update. **delete:** blocat dacă are subscriptions/posts.
+- **Post.create/update:** premium ⇒ tier obligatoriu; free ⇒ fără tier; tier-ul
+  trebuie să aparțină autorului (altfel `BusinessRule`). Tag-urile: get-or-create
+  după nume (în `PostServiceImpl` prin `TagRepository`). **delete** simplu
+  (comentariile cad prin orphanRemoval; rândurile din `post_tags` se șterg, dar
+  tag-urile rămân).
+- **Subscription.create:** fan ≠ creatorul tier-ului (`BusinessRule`); fără a 2-a
+  abonare ACTIVE (`Duplicate`); `startDate = azi`, `status = ACTIVE`. „Update"-ul
+  cu sens e tranziția de status → metoda `cancel(id)`.
+- **Comment.create:** doar existența post+author. *Controlul accesului premium
+  (doar abonații comentează) e lăsat intenționat pentru faza de Security/Views.*
+- **Profile:** entitate dependentă → `ProfileService` expune doar read + update
+  (create/delete se fac prin `User`, conform compoziției din §8).
+
+### Teste
+
+`Phase2ServiceFlowTests` (`@SpringBootTest @Transactional`, rollback per test) —
+9 teste pe baza Docker (5433). Profil de test dedicat (H2/Testcontainers) vine la
+Faza Testing.
