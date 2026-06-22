@@ -42,6 +42,7 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   controllere încă (Faza Views).
 - Profiluri Spring: `dev` (PostgreSQL/Docker) și `test` (H2 in-memory) — vezi §10.
 - Securitate: Spring Security (sesiune, BCrypt, CSRF, roluri) — vezi §11.
+- Paginare/sortare (`PagedResponse`) + logging (Logback, AOP) — vezi §12.
 - Build tool: Maven (NU Gradle)
 
 ## 3. Reguli de lucru (valabile pentru tot proiectul)
@@ -105,10 +106,16 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   REST (`/api/auth/login`) + pagină statică `/login`, logout, CSRF cookie-based
   (SPA-ready), remember-me, roluri USER/ADMIN, handler-e 401/403 JSON, admin seed
   pe dev. Verificat: **19 teste** verzi pe H2 + flux real cu curl. Detalii în §11.
-- [ ] **Faza 5 (următoarea) — Views / REST:** controllere REST pentru restul
-  entităților, Bean Validation pe DTO-uri, `@RestControllerAdvice` global (mapează
-  excepțiile la coduri HTTP, reutilizând `ApiErrorResponse`), apoi microservicii,
-  cache Redis, MongoDB, monitorizare, React.
+- [x] **Faza 5 — Paginare/Sortare + Logging (COMPLETĂ, 2026-06-23):** `Pageable`
+  + `PagedResponse<T>` pentru Post, User, Subscription (sortare whitelisted, page
+  size plafonat la 100); Logback (`logback-spring.xml`) cu fișier de erori separat,
+  nivele per profil; `@Slf4j` în service, aspect AOP de logging, `GlobalExceptionHandler`
+  (ERROR pentru erori neașteptate). Verificat: **25 teste** verzi + logging la
+  runtime. Detalii în §12.
+- [ ] **Faza 6 (următoarea) — Views / REST:** controllere REST pentru restul
+  entităților, Bean Validation pe DTO-uri, extinderea `GlobalExceptionHandler`
+  (validare input → 400 cu erori pe câmpuri), apoi microservicii, cache Redis,
+  MongoDB, monitorizare, React.
 
 ## 6. Comenzi utile
 
@@ -325,3 +332,51 @@ stateless (`SessionCreationPolicy.STATELESS`), iar login-ul întoarce un token J
 protejat fără auth (401), admin ca USER (403) / ca ADMIN (200), logout, CSRF
 enforced (register+logout fără token → 403). Plus cele 9 de la Faza 2 = **19 verzi**
 pe H2.
+
+## 12. Paginare/Sortare + Logging (Faza 5)
+
+### Paginare & sortare
+Entități paginate (`Pageable` în repository + service): **Post, User, Subscription**.
+Service-urile întorc **`PagedResponse<T>`** (DTO stabil: `content, page, size,
+totalElements, totalPages, first, last`) — NU expunem `Page` din Spring.
+
+- **Câmpuri de sortare permise (whitelist, în `service.impl`):**
+  - Post: `id, title, createdAt, premium`
+  - User: `id, username, email, role, enabled` *(NICIODATĂ `password`)*
+  - Subscription: `id, startDate, status`
+- **`PageableUtils.sanitize(pageable, allowed)`** (în `com.creatorhub.common`):
+  validează sortarea (câmp neautorizat → `BusinessRuleException` 400) și plafonează
+  page size la **`MAX_PAGE_SIZE=100`**. Asta blochează și sortarea după câmpuri
+  interne/sensibile (ex. `password`) și evită `PropertyReferenceException`.
+- **Dimensiuni pagină:** default **20**, max **100** — declarativ în `application.yml`
+  (`spring.data.web.pageable`, pentru Pageable din request la Faza Views) ȘI în
+  service (defense in depth, testabil acum).
+
+### Logging
+`logback-spring.xml` (SLF4J + Logback). Appendere: **CONSOLE** + **FILE**
+(`logs/creatorhub.log`, rolling size+time) + **ERROR_FILE**
+(`logs/creatorhub-error.log`, cu `ThresholdFilter` ERROR → DOAR ERROR+). `logs/`
+e în `.gitignore`.
+
+- **Nivele per profil:** `dev` → `com.creatorhub`=DEBUG, root=INFO, consolă+fișiere;
+  `test` → root=WARN, consolă (fără fișiere, ca să nu polueze testele); fallback
+  (prod) → INFO, consolă+fișiere.
+- **În cod:** `@Slf4j` în service-uri. INFO (user/post creat, abonament activat),
+  WARN (auto-abonare/abonare duplicată respinsă, delete blocat), ERROR (în
+  `GlobalExceptionHandler` pentru erori neașteptate). Parametrizat (`{}`).
+  **SECURITATE: niciodată parole/token-uri** — se loghează doar username/id.
+- **AOP (bonus, cerut):** `ServiceLoggingAspect` (`@Around` pe `service.impl`)
+  loghează la DEBUG intrarea/ieșirea + timpul. **Loghează doar numele metodei +
+  NUMĂRUL de argumente, nu valorile** (altfel ar scurge parola din `UserRequest`).
+  Guard `isDebugEnabled()` → no-op în test/prod.
+- **`GlobalExceptionHandler`** (`@RestControllerAdvice`): mapează excepțiile de
+  domeniu la codurile §9 (404/409/400, log WARN) + `AccessDeniedException`→403 +
+  catch-all `Exception`→500 (log **ERROR**). *Decizie: l-am adus acum (Faza Views
+  îl extinde cu validarea input). Limitare cunoscută: input malformat (JSON
+  invalid) dă momentan 500, nu 400 — Faza Views adaugă handler-ul de validare.*
+
+### Verificat
+- 25 teste verzi pe H2 (`PaginationSortingTests` 6 + securitate 10 + Faza 2 9).
+- Runtime dev: INFO `User created: id=.. username=..` (fără parolă) în
+  `creatorhub.log`, AOP DEBUG `call/done ...() [N args] in X ms`; `creatorhub-error.log`
+  conține DOAR ERROR (0 INFO/WARN). Eroare provocată: JSON malformat → 500 ERROR.

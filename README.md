@@ -89,6 +89,34 @@ See [CLAUDE.md](CLAUDE.md) §11 for the full security design (login-page decisio
 CSRF for SPA, remember-me, URL authorization convention, and how JWT will be added
 on top at the microservices stage).
 
+## Pagination & sorting
+
+`Post`, `User` and `Subscription` support pagination and sorting. The service
+layer returns a stable `PagedResponse<T>` and, once REST controllers exist (Views
+phase), the API will accept the standard Spring Data params:
+
+```
+GET /api/posts?page=0&size=20&sort=title,asc
+GET /api/posts?page=1&size=10&sort=createdAt,desc
+```
+
+- Page numbers are **0-based**; default size **20**, hard max **100**.
+- Allowed sort fields (whitelisted — anything else returns `400`):
+  posts `id,title,createdAt,premium`; users `id,username,email,role,enabled`
+  (never `password`); subscriptions `id,startDate,status`.
+
+## Logging
+
+SLF4J + Logback (`logback-spring.xml`). Logs go to the console and to files under
+`logs/` (git-ignored):
+
+- `logs/creatorhub.log` — general log (rolling by size/day).
+- `logs/creatorhub-error.log` — **errors only** (`ERROR` and above).
+
+Levels per profile: `dev` logs `com.creatorhub` at `DEBUG`; `test` is quiet
+(`WARN`, console only). An AOP aspect logs service method entry/exit and timing at
+`DEBUG`. Passwords and tokens are **never** logged.
+
 ## Project layout
 
 ```
