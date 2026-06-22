@@ -59,6 +59,36 @@ Config files: `application.yml` (common, defaults the active profile to `dev`),
 `application-dev.yml` (PostgreSQL), `application-test.yml` (H2). A production
 profile with externalized secrets will be added in a later phase.
 
+## Security & authentication
+
+Session-based authentication backed by the database (BCrypt passwords, CSRF
+active, roles `USER` / `ADMIN`, token-based remember-me). It is exposed via REST
+so a React SPA can consume it; a minimal custom login page is served at
+[`/login`](http://localhost:8081/login) for manual testing.
+
+Endpoints (run on dev, `:8081`):
+
+| Method & path | Access | Purpose |
+|---|---|---|
+| `POST /api/auth/register` | public | create a `USER` account |
+| `POST /api/auth/login` | public | log in (creates a session) |
+| `POST /api/auth/logout` | session | log out |
+| `GET /api/auth/me` | authenticated | current user |
+| `GET /api/admin/users` | `ADMIN` | list all users |
+
+**CSRF:** state-changing requests need the CSRF token. Clients first do a `GET`
+(e.g. load `/login`) to receive the `XSRF-TOKEN` cookie, then send it back in the
+`X-XSRF-TOKEN` header. The static login page does this automatically.
+
+**Dev admin (development only):** on the `dev` profile an admin is seeded at
+startup — username `admin`, password `admin123`. These are development-only
+credentials and are never seeded in `test` or production. Self-registration only
+ever creates `USER` accounts.
+
+See [CLAUDE.md](CLAUDE.md) §11 for the full security design (login-page decision,
+CSRF for SPA, remember-me, URL authorization convention, and how JWT will be added
+on top at the microservices stage).
+
 ## Project layout
 
 ```

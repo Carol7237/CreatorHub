@@ -41,6 +41,7 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
 - Backend: repository + DTO + mapper + service layer + excepții (vezi §9). Fără
   controllere încă (Faza Views).
 - Profiluri Spring: `dev` (PostgreSQL/Docker) și `test` (H2 in-memory) — vezi §10.
+- Securitate: Spring Security (sesiune, BCrypt, CSRF, roluri) — vezi §11.
 - Build tool: Maven (NU Gradle)
 
 ## 3. Reguli de lucru (valabile pentru tot proiectul)
@@ -99,9 +100,15 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   `dev` (PostgreSQL/Docker, 5433) și `test` (H2 in-memory). `application.yml`
   bază comună (profil implicit `dev`) + `application-dev.yml` + `application-test.yml`.
   Testele rulează pe H2 (`@ActiveProfiles("test")`), fără Docker. Detalii în §10.
-- [ ] **Faza 4 (următoarea) — Views / REST:** controllere REST, Bean Validation
-  pe DTO-uri, `@RestControllerAdvice` global (mapează excepțiile la coduri HTTP),
-  apoi Security, microservicii, cache Redis, MongoDB, monitorizare, React.
+- [x] **Faza 4 — Spring Security (COMPLETĂ, 2026-06-23):** autentificare din DB
+  (`CustomUserDetailsService` + adapter `SecurityUser`), BCrypt, sesiune, login
+  REST (`/api/auth/login`) + pagină statică `/login`, logout, CSRF cookie-based
+  (SPA-ready), remember-me, roluri USER/ADMIN, handler-e 401/403 JSON, admin seed
+  pe dev. Verificat: **19 teste** verzi pe H2 + flux real cu curl. Detalii în §11.
+- [ ] **Faza 5 (următoarea) — Views / REST:** controllere REST pentru restul
+  entităților, Bean Validation pe DTO-uri, `@RestControllerAdvice` global (mapează
+  excepțiile la coduri HTTP, reutilizând `ApiErrorResponse`), apoi microservicii,
+  cache Redis, MongoDB, monitorizare, React.
 
 ## 6. Comenzi utile
 
@@ -242,3 +249,79 @@ enum-uri ca STRING, FK-uri, IDENTITY). Tabela `users` (plural) nu e cuvânt reze
 
 **Profil de producție:** NU există încă (intenționat). Vine mai târziu (faza de
 microservicii/deployment), cu secrete externalizate (env vars / Config Server).
+
+## 11. Spring Security (Faza 4)
+
+Autentificare din DB, pe **sesiune**, expusă prin REST (consumabilă de un SPA),
+fundație 100% refolosibilă pentru JWT la microservicii.
+
+### Cum funcționează autentificarea
+- `CustomUserDetailsService` încarcă userul din `UserRepository` după username și
+  îl mapează prin adaptorul `SecurityUser` (entitatea `User` NU implementează
+  `UserDetails` — domeniul rămâne decuplat de framework). Rolul → authority
+  `ROLE_<role>` (prefix `ROLE_` pentru `hasRole`).
+- `PasswordEncoder` = `BCryptPasswordEncoder`. `UserServiceImpl.create/update`
+  encodează parola cu BCrypt înainte de salvare (nu se mai stochează în clar).
+- Login: `POST /api/auth/login` (JSON) autentifică programatic via
+  `AuthenticationManager`, salvează `SecurityContext` în sesiune
+  (`HttpSessionSecurityContextRepository`), întoarce `UserResponse` (200) sau 401.
+- Logout: `POST /api/auth/logout` (filtrul Spring) invalidează sesiunea, șterge
+  `JSESSIONID` + `remember-me`, întoarce 200.
+- `GET /api/auth/me` = userul curent (util pentru SPA).
+
+### Decizia despre login page (hibrid)
+Cerința „pagină de login custom" + frontend React = tensiune reală (am întrebat).
+Ales: **hibrid** — pagină statică `/login` (`static/login.html`, forward din
+`WebConfig`) ca soluție de tranziție care bifează cerința + testare manuală ACUM,
+ȘI endpoint REST `/api/auth/login` ca sursă principală pe care o va consuma React
+la Faza Views. Ambele pe aceeași sesiune. Pagina statică poate fi păstrată sau
+eliminată la final.
+
+### CSRF (activ, pentru ambele moduri — fără conflict)
+`CookieCsrfTokenRepository.withHttpOnlyFalse()` + `SpaCsrfTokenRequestHandler`
+(handler-ul oficial Spring care acceptă tokenul ȘI din header SPA `X-XSRF-TOKEN`
+ȘI din param de formular clasic `_csrf`) + `CsrfCookieFilter` (emite cookie-ul
+`XSRF-TOKEN`). Pagina statică și React folosesc **același** flux: citesc cookie-ul
+`XSRF-TOKEN`, îl trimit în header. Deci NU e conflict între „form clasic" și SPA —
+un singur mecanism. Verificat real (curl): logout/register fără token → **403**,
+cu token → 200/201.
+
+### Remember-me
+Token-based (`TokenBasedRememberMeServices`, cheie dev în `SecurityConfig` — de
+externalizat la prod), validitate 14 zile. Declanșat din login când
+`rememberMe=true` (request wrapper care expune parametrul către serviciu).
+
+### Convenția de URL pentru autorizare (construim controllerele la Faza Views consecvent!)
+- `POST /api/auth/register`, `POST /api/auth/login` → **public**
+- `POST /api/auth/logout`, `GET /api/auth/me` → autentificat
+- `GET /api/creators/**`, `/api/profiles/**`, `/api/posts/**`, `/api/tags/**` →
+  **public** (citire/browsing). *Gating-ul premium NU se face pe URL — se enforce
+  în service layer (verificare abonament) la Faza Views.*
+- `/api/admin/**` → **`hasRole('ADMIN')`** (+ `@PreAuthorize` pe metodă, defense
+  in depth). Exemplu existent: `GET /api/admin/users`.
+- static (`/`, `/login`, `/css/**`, ...) → public; **orice altceva** → autentificat.
+
+### Erori de securitate → cod HTTP
+- Neautentificat pe resursă protejată → **401** (`RestAuthenticationEntryPoint`).
+- Autentificat fără rol → **403** (`RestAccessDeniedHandler`).
+- Ambele întorc JSON `ApiErrorResponse` (nu HTML), aliniat cu viitorul
+  `@RestControllerAdvice` (care va reutiliza `ApiErrorResponse` pentru 404/409/400).
+
+### Admin (seed pe dev)
+`DevDataSeeder` (`@Profile("dev")`, idempotent) creează un admin la pornire DOAR
+pe dev: **username `admin` / parolă `admin123`** (doar pentru development; nu în
+test/prod). Register-ul public creează DOAR `USER` (fără câmp `role` în
+`RegisterRequest` → fără escaladare de privilegii).
+
+### JWT mai târziu (la microservicii)
+Se adaugă un filtru JWT PESTE această fundație. **Se refolosesc neschimbate:**
+`CustomUserDetailsService` și `PasswordEncoder`. Se schimbă doar: sesiune →
+stateless (`SessionCreationPolicy.STATELESS`), iar login-ul întoarce un token JWT
+în loc să creeze sesiune. Regulile de autorizare pe URL/rol rămân identice.
+
+### Teste
+`SecurityIntegrationTests` (MockMvc + spring-security-test, `@ActiveProfiles("test")`)
+— 10 teste: register+hash BCrypt, login ok/greșit (401), remember-me cookie,
+protejat fără auth (401), admin ca USER (403) / ca ADMIN (200), logout, CSRF
+enforced (register+logout fără token → 403). Plus cele 9 de la Faza 2 = **19 verzi**
+pe H2.
