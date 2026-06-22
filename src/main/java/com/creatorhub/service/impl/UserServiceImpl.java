@@ -1,5 +1,7 @@
 package com.creatorhub.service.impl;
 
+import com.creatorhub.common.PageableUtils;
+import com.creatorhub.dto.PagedResponse;
 import com.creatorhub.dto.UserRequest;
 import com.creatorhub.dto.UserResponse;
 import com.creatorhub.dto.mapper.UserMapper;
@@ -12,16 +14,23 @@ import com.creatorhub.model.enums.Role;
 import com.creatorhub.repository.UserRepository;
 import com.creatorhub.service.UserService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 
 @Service
 @Transactional
 @RequiredArgsConstructor
+@Slf4j
 public class UserServiceImpl implements UserService {
+
+    /** Whitelisted sort properties for users — NOTE: never includes "password". */
+    private static final Set<String> ALLOWED_SORT = Set.of("id", "username", "email", "role", "enabled");
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -54,7 +63,10 @@ public class UserServiceImpl implements UserService {
         profile.setUser(user);
         user.setProfile(profile);
 
-        return UserMapper.toResponse(userRepository.save(user));
+        User saved = userRepository.save(user);
+        // SECURITY: log identifiers only, never the password.
+        log.info("User created: id={} username={} role={}", saved.getId(), saved.getUsername(), saved.getRole());
+        return UserMapper.toResponse(saved);
     }
 
     @Override
@@ -75,6 +87,14 @@ public class UserServiceImpl implements UserService {
     @Transactional(readOnly = true)
     public List<UserResponse> findAll() {
         return userRepository.findAll().stream().map(UserMapper::toResponse).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PagedResponse<UserResponse> findAll(Pageable pageable) {
+        Pageable safe = PageableUtils.sanitize(pageable, ALLOWED_SORT);
+        log.debug("findAll users page={} size={} sort={}", safe.getPageNumber(), safe.getPageSize(), safe.getSort());
+        return PagedResponse.from(userRepository.findAll(safe).map(UserMapper::toResponse));
     }
 
     @Override
@@ -127,11 +147,13 @@ public class UserServiceImpl implements UserService {
         // must clean those up first. (Decision documented in CLAUDE.md.)
         if (!user.getTiers().isEmpty() || !user.getPosts().isEmpty()
                 || !user.getComments().isEmpty() || !user.getSubscriptions().isEmpty()) {
+            log.warn("Blocked delete of user id={}: still has dependent tiers/posts/comments/subscriptions", id);
             throw new ResourceInUseException("Cannot delete user " + id
                     + ": they still have tiers, posts, comments or subscriptions. Remove those first.");
         }
 
         userRepository.delete(user);
+        log.info("User deleted: id={}", id);
     }
 
     private User getOrThrow(Long id) {

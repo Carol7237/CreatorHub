@@ -1,5 +1,7 @@
 package com.creatorhub.service.impl;
 
+import com.creatorhub.common.PageableUtils;
+import com.creatorhub.dto.PagedResponse;
 import com.creatorhub.dto.SubscriptionRequest;
 import com.creatorhub.dto.SubscriptionResponse;
 import com.creatorhub.dto.mapper.SubscriptionMapper;
@@ -15,16 +17,23 @@ import com.creatorhub.repository.SubscriptionTierRepository;
 import com.creatorhub.repository.UserRepository;
 import com.creatorhub.service.SubscriptionService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @Transactional
 @RequiredArgsConstructor
+@Slf4j
 public class SubscriptionServiceImpl implements SubscriptionService {
+
+    /** Whitelisted sort properties for subscriptions. */
+    private static final Set<String> ALLOWED_SORT = Set.of("id", "startDate", "status");
 
     private final SubscriptionRepository subscriptionRepository;
     private final UserRepository userRepository;
@@ -39,12 +48,14 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
         // A creator cannot subscribe to their own tier.
         if (tier.getCreator() != null && tier.getCreator().getId().equals(fan.getId())) {
+            log.warn("Rejected self-subscription: user={} tier={}", fan.getId(), tier.getId());
             throw new BusinessRuleException("A creator cannot subscribe to their own tier");
         }
 
         // Cannot have two active subscriptions to the same tier.
         if (subscriptionRepository.existsByFanIdAndTierIdAndStatus(
                 fan.getId(), tier.getId(), SubStatus.ACTIVE)) {
+            log.warn("Rejected duplicate active subscription: fan={} tier={}", fan.getId(), tier.getId());
             throw new DuplicateResourceException(
                     "Fan " + fan.getId() + " already has an active subscription to tier " + tier.getId());
         }
@@ -55,7 +66,9 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         subscription.setStatus(SubStatus.ACTIVE);
         subscription.setStartDate(LocalDate.now());
 
-        return SubscriptionMapper.toResponse(subscriptionRepository.save(subscription));
+        Subscription saved = subscriptionRepository.save(subscription);
+        log.info("Subscription activated: id={} fan={} tier={}", saved.getId(), fan.getId(), tier.getId());
+        return SubscriptionMapper.toResponse(saved);
     }
 
     @Override
@@ -72,9 +85,24 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
     @Override
     @Transactional(readOnly = true)
+    public PagedResponse<SubscriptionResponse> findAll(Pageable pageable) {
+        Pageable safe = PageableUtils.sanitize(pageable, ALLOWED_SORT);
+        log.debug("findAll subscriptions page={} size={} sort={}", safe.getPageNumber(), safe.getPageSize(), safe.getSort());
+        return PagedResponse.from(subscriptionRepository.findAll(safe).map(SubscriptionMapper::toResponse));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<SubscriptionResponse> findByFan(Long fanId) {
         return subscriptionRepository.findByFanId(fanId).stream()
                 .map(SubscriptionMapper::toResponse).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PagedResponse<SubscriptionResponse> findByFan(Long fanId, Pageable pageable) {
+        Pageable safe = PageableUtils.sanitize(pageable, ALLOWED_SORT);
+        return PagedResponse.from(subscriptionRepository.findByFanId(fanId, safe).map(SubscriptionMapper::toResponse));
     }
 
     @Override

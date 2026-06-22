@@ -1,5 +1,7 @@
 package com.creatorhub.service.impl;
 
+import com.creatorhub.common.PageableUtils;
+import com.creatorhub.dto.PagedResponse;
 import com.creatorhub.dto.PostRequest;
 import com.creatorhub.dto.PostResponse;
 import com.creatorhub.dto.mapper.PostMapper;
@@ -15,6 +17,8 @@ import com.creatorhub.repository.TagRepository;
 import com.creatorhub.repository.UserRepository;
 import com.creatorhub.service.PostService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,7 +30,11 @@ import java.util.stream.Collectors;
 @Service
 @Transactional
 @RequiredArgsConstructor
+@Slf4j
 public class PostServiceImpl implements PostService {
+
+    /** Whitelisted sort properties for posts (never exposes internal fields). */
+    private static final Set<String> ALLOWED_SORT = Set.of("id", "title", "createdAt", "premium");
 
     private final PostRepository postRepository;
     private final UserRepository userRepository;
@@ -48,7 +56,9 @@ public class PostServiceImpl implements PostService {
         post.setTier(tier);
         post.setTags(resolveTags(request.getTags()));
 
-        return PostMapper.toResponse(postRepository.save(post));
+        Post saved = postRepository.save(post);
+        log.info("Post published: id={} creator={} premium={}", saved.getId(), author.getId(), saved.isPremium());
+        return PostMapper.toResponse(saved);
     }
 
     @Override
@@ -65,8 +75,23 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional(readOnly = true)
+    public PagedResponse<PostResponse> findAll(Pageable pageable) {
+        Pageable safe = PageableUtils.sanitize(pageable, ALLOWED_SORT);
+        log.debug("findAll posts page={} size={} sort={}", safe.getPageNumber(), safe.getPageSize(), safe.getSort());
+        return PagedResponse.from(postRepository.findAll(safe).map(PostMapper::toResponse));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<PostResponse> findByCreator(Long creatorId) {
         return postRepository.findByAuthorId(creatorId).stream().map(PostMapper::toResponse).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PagedResponse<PostResponse> findByCreator(Long creatorId, Pageable pageable) {
+        Pageable safe = PageableUtils.sanitize(pageable, ALLOWED_SORT);
+        return PagedResponse.from(postRepository.findByAuthorId(creatorId, safe).map(PostMapper::toResponse));
     }
 
     @Override
