@@ -17,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -27,12 +28,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Phase 2 smoke / flow tests for the service layer. They run against the Docker
- * PostgreSQL (localhost:5433) and roll back after each test (@Transactional), so
- * they are repeatable. A dedicated test profile (H2 / Testcontainers) will be
- * introduced in the Testing phase.
+ * Phase 2 smoke / flow tests for the service layer. They run on the "test"
+ * profile (H2 in-memory, no Docker required) and roll back after each test
+ * (@Transactional), so they are repeatable.
  */
 @SpringBootTest
+@ActiveProfiles("test")
 @Transactional
 class Phase2ServiceFlowTests {
 
