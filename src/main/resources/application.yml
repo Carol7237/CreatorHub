@@ -3,7 +3,9 @@ spring:
     name: creatorhub
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/creatorhub
+    # Port 5433 on the host (mapped to the container's 5432) to avoid clashing
+    # with a native PostgreSQL that may already run on the standard 5432.
+    url: jdbc:postgresql://localhost:5433/creatorhub
     username: creatorhub
     password: creatorhub
     driver-class-name: org.postgresql.Driver
@@ -23,4 +25,6 @@ spring:
     open-in-view: false
 
 server:
-  port: 8080
+  # 8081 instead of the default 8080, which an Oracle TNS listener / APEX may
+  # occupy on dev machines.
+  port: 8081
