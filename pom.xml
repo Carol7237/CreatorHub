@@ -34,6 +34,12 @@
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
 
+        <!-- AOP (automatic service-layer logging aspect) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
         <!-- Persistence (JPA / Hibernate) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
