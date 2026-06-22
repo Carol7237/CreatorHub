@@ -12,9 +12,12 @@ buildNumber.properties
 !.mvn/wrapper/maven-wrapper.jar
 .mvn/wrapper/maven-wrapper.properties.bak
 
+### Logs ###
+logs/
+*.log
+
 ### Compiled output ###
 *.class
-*.log
 
 ### IntelliJ IDEA ###
 .idea/
