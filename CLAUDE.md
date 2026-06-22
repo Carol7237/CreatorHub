@@ -74,10 +74,12 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
 
 ## 5. Progres pe faze
 
-- [~] **Faza 0 — Setup (în curs/aproape gata):** schelet Maven + Spring Boot,
-  structura de pachete, `docker-compose.yml` (PostgreSQL 16), `application.yml`,
-  `.gitignore`, README, Maven Wrapper, repo Git inițializat, compilare verde.
-- [ ] **Faze următoare:** model de date & entități, repository-uri, servicii,
+- [x] **Faza 0 — Setup (COMPLETĂ, 2026-06-23):** schelet Maven + Spring Boot
+  3.5.15, structura de pachete sub `com.creatorhub`, `docker-compose.yml`
+  (PostgreSQL 16), `application.yml`, `.gitignore` + `.gitattributes`, README,
+  Maven Wrapper (`./mvnw`), repo Git inițializat (commit `201c40d`).
+  Verificat: `./mvnw clean compile` → **BUILD SUCCESS**.
+- [ ] **Faza 1 (următoarea) — Model de date:** entități JPA + repository-uri
   controllere REST, validare & handler global de erori, autentificare
   (Spring Security — abia în faza ei), apoi spargerea în microservicii,
   cache Redis, MongoDB, monitorizare, frontend React.
