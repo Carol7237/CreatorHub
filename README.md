@@ -37,6 +37,28 @@ the container's 5432; database `creatorhub`, user `creatorhub`, password
 Both ports avoid common dev-machine conflicts (a native PostgreSQL on 5432, an
 Oracle listener on 8080).
 
+## Environments (Spring profiles)
+
+Two profiles, each backed by its own database:
+
+| Profile | Database | When |
+|---------|----------|------|
+| `dev` (default) | PostgreSQL 16 in Docker (`localhost:5433`) | running the app locally |
+| `test` | H2 in-memory | automated tests (`@ActiveProfiles("test")`) |
+
+```bash
+# DEV — needs Docker (the default profile)
+docker compose up -d
+./mvnw spring-boot:run          # active profile: dev, HTTP on :8081
+
+# TEST — needs NO Docker (H2 in-memory)
+./mvnw clean test               # active profile: test
+```
+
+Config files: `application.yml` (common, defaults the active profile to `dev`),
+`application-dev.yml` (PostgreSQL), `application-test.yml` (H2). A production
+profile with externalized secrets will be added in a later phase.
+
 ## Project layout
 
 ```

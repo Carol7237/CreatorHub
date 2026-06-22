@@ -40,6 +40,7 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
 - Model de date: 7 entități JPA + 2 enum-uri (vezi §8)
 - Backend: repository + DTO + mapper + service layer + excepții (vezi §9). Fără
   controllere încă (Faza Views).
+- Profiluri Spring: `dev` (PostgreSQL/Docker) și `test` (H2 in-memory) — vezi §10.
 - Build tool: Maven (NU Gradle)
 
 ## 3. Reguli de lucru (valabile pentru tot proiectul)
@@ -94,7 +95,11 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   reguli de business și `@Transactional`, ierarhie de 4 excepții (+ bază). Fără
   controllere încă (vin la Faza Views). Verificat: `./mvnw clean compile` verde
   și **9 teste de integrare** trec (`Phase2ServiceFlowTests`). Detalii în §9.
-- [ ] **Faza 3 (următoarea) — Views / REST:** controllere REST, Bean Validation
+- [x] **Faza 3 — Multi-Environment (COMPLETĂ, 2026-06-23):** profiluri Spring
+  `dev` (PostgreSQL/Docker, 5433) și `test` (H2 in-memory). `application.yml`
+  bază comună (profil implicit `dev`) + `application-dev.yml` + `application-test.yml`.
+  Testele rulează pe H2 (`@ActiveProfiles("test")`), fără Docker. Detalii în §10.
+- [ ] **Faza 4 (următoarea) — Views / REST:** controllere REST, Bean Validation
   pe DTO-uri, `@RestControllerAdvice` global (mapează excepțiile la coduri HTTP),
   apoi Security, microservicii, cache Redis, MongoDB, monitorizare, React.
 
@@ -205,6 +210,35 @@ Rădăcină: `CreatorHubException` (abstractă) → toate moștenesc din ea.
 
 ### Teste
 
-`Phase2ServiceFlowTests` (`@SpringBootTest @Transactional`, rollback per test) —
-9 teste pe baza Docker (5433). Profil de test dedicat (H2/Testcontainers) vine la
-Faza Testing.
+`Phase2ServiceFlowTests` (`@SpringBootTest @ActiveProfiles("test") @Transactional`,
+rollback per test) — 9 teste. Rulează pe **H2 in-memory** (vezi §10), fără Docker.
+
+## 10. Multi-environment (Faza 3)
+
+Minimum 2 profiluri Spring + 2 baze diferite, configurare separată pe fișiere.
+
+| Profil | Bază de date | `ddl-auto` | `show-sql` | Port HTTP |
+|---|---|---|---|---|
+| `dev` (implicit) | PostgreSQL 16 în Docker, host `5433` | `update` | true | 8081 |
+| `test` | H2 in-memory (`creatorhub_test`) | `create-drop` | false | — (`@SpringBootTest` MOCK) |
+
+- **`application.yml`** = config comună (nume app, `spring.profiles.active=dev`,
+  `open-in-view=false`, `format_sql`). Rularea normală (`./mvnw spring-boot:run`)
+  pornește pe **dev**.
+- **`application-dev.yml`** = datasource PostgreSQL (5433), `ddl-auto=update`,
+  `show-sql=true`, `server.port=8081`.
+- **`application-test.yml`** = datasource H2 in-memory, `ddl-auto=create-drop`,
+  `show-sql=false`.
+- Testele: `@ActiveProfiles("test")` → H2, **fără dependență de Docker**
+  (verificat: `docker compose down` + `./mvnw clean test` → 9/9 verde).
+- **H2 dependency** în `pom.xml` cu scope `test` (nu ajunge în producție).
+
+**Compatibilitate H2 ↔ PostgreSQL:** rezolvată curat prin **`MODE=PostgreSQL`** în
+URL-ul H2 (`jdbc:h2:mem:creatorhub_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL`) — fără
+hack-uri în entități. Aliniază tipurile (TEXT pe `Post.body`, `numeric(10,2)`,
+enum-uri ca STRING, FK-uri, IDENTITY). Tabela `users` (plural) nu e cuvânt rezervat
+în H2 (spre deosebire de `user`), deci redenumirea din Faza 1 ajută și aici.
+`DB_CLOSE_DELAY=-1` ține baza in-memory vie pe toată durata JVM-ului.
+
+**Profil de producție:** NU există încă (intenționat). Vine mai târziu (faza de
+microservicii/deployment), cu secrete externalizate (env vars / Config Server).
