@@ -1,0 +1,10 @@
+# Normalize line endings: store as LF in the repo, auto-convert on checkout.
+* text=auto
+
+# Shell scripts must stay LF even when checked out on Windows.
+*.sh   text eol=lf
+mvnw   text eol=lf
+
+# Windows scripts use CRLF.
+*.cmd  text eol=crlf
+*.bat  text eol=crlf

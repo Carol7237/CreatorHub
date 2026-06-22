@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: creatorhub
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/creatorhub
+    username: creatorhub
+    password: creatorhub
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      # Development convenience: Hibernate keeps the schema in sync with the
+      # entities. Will be replaced by a proper migration tool (Flyway/Liquibase)
+      # before any production use.
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    # Disable Open Session In View: keep transaction boundaries inside the
+    # service layer instead of leaking lazy-loading into controllers/views.
+    open-in-view: false
+
+server:
+  port: 8080

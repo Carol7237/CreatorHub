@@ -1,0 +1,26 @@
+# CreatorHub — local development infrastructure.
+# Phase 0: a single PostgreSQL 16 instance with a persistent volume.
+# Start with:  docker compose up -d
+# Stop with:   docker compose down        (add -v to also drop the data volume)
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: creatorhub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: creatorhub
+      POSTGRES_PASSWORD: creatorhub
+      POSTGRES_DB: creatorhub
+    ports:
+      - "5432:5432"
+    volumes:
+      - creatorhub-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creatorhub -d creatorhub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  creatorhub-pgdata:
