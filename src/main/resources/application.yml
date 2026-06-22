@@ -1,30 +1,21 @@
+# Base / common configuration — settings that apply to EVERY environment.
+# Environment-specific settings (datasource, ddl-auto, ports) live in the
+# profile files: application-dev.yml (PostgreSQL/Docker) and
+# application-test.yml (H2 in-memory).
+#
+# Default active profile is "dev", so `./mvnw spring-boot:run` starts against the
+# Docker PostgreSQL. Tests override this with @ActiveProfiles("test").
 spring:
   application:
     name: creatorhub
 
-  datasource:
-    # Port 5433 on the host (mapped to the container's 5432) to avoid clashing
-    # with a native PostgreSQL that may already run on the standard 5432.
-    url: jdbc:postgresql://localhost:5433/creatorhub
-    username: creatorhub
-    password: creatorhub
-    driver-class-name: org.postgresql.Driver
+  profiles:
+    active: dev
 
   jpa:
-    hibernate:
-      # Development convenience: Hibernate keeps the schema in sync with the
-      # entities. Will be replaced by a proper migration tool (Flyway/Liquibase)
-      # before any production use.
-      ddl-auto: update
-    show-sql: true
+    # Keep transaction boundaries inside the service layer (no Open Session In
+    # View); valid in all environments.
+    open-in-view: false
     properties:
       hibernate:
         format_sql: true
-    # Disable Open Session In View: keep transaction boundaries inside the
-    # service layer instead of leaking lazy-loading into controllers/views.
-    open-in-view: false
-
-server:
-  # 8081 instead of the default 8080, which an Oracle TNS listener / APEX may
-  # occupy on dev machines.
-  port: 8081

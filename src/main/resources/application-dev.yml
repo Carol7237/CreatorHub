@@ -1,0 +1,20 @@
+# DEV profile — local development against the PostgreSQL 16 container.
+# Start the database first:  docker compose up -d
+spring:
+  datasource:
+    # Host port 5433 -> container 5432 (avoids a native PostgreSQL on 5432).
+    url: jdbc:postgresql://localhost:5433/creatorhub
+    username: creatorhub
+    password: creatorhub
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      # Dev convenience: keep the schema in sync with the entities. Replaced by
+      # versioned migrations (Flyway/Liquibase) before any production use.
+      ddl-auto: update
+    show-sql: true
+
+server:
+  # 8081 instead of the default 8080 (an Oracle TNS listener may occupy 8080).
+  port: 8081
