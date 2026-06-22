@@ -35,7 +35,9 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
 - Spring Boot **3.5.15** (parent), Maven prin **Maven Wrapper** (`./mvnw`)
 - Dependențe: Spring Web, Spring Data JPA, Validation, PostgreSQL Driver,
   Lombok, DevTools, spring-boot-starter-test (test scope)
-- PostgreSQL **16** în Docker (`docker-compose.yml`)
+- PostgreSQL **16** în Docker (`docker-compose.yml`) — pe host portul **5433**
+  (mapat la 5432 din container), HTTP pe **8081** (vezi §7 pentru de ce)
+- Model de date: 7 entități JPA + 2 enum-uri (vezi §8)
 - Build tool: Maven (NU Gradle)
 
 ## 3. Reguli de lucru (valabile pentru tot proiectul)
@@ -79,7 +81,12 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   (PostgreSQL 16), `application.yml`, `.gitignore` + `.gitattributes`, README,
   Maven Wrapper (`./mvnw`), repo Git inițializat (commit `201c40d`).
   Verificat: `./mvnw clean compile` → **BUILD SUCCESS**.
-- [ ] **Faza 1 (următoarea) — Model de date:** entități JPA + repository-uri
+- [x] **Faza 1 — Model de date (COMPLETĂ, 2026-06-23):** 7 entități JPA
+  (`User`, `Profile`, `SubscriptionTier`, `Post`, `Subscription`, `Comment`,
+  `Tag`) + 2 enum-uri (`Role`, `SubStatus`) în `com.creatorhub.model[.enums]`.
+  Verificat: Hibernate a generat 8 tabele (cele 7 + `post_tags`) și 10 FK-uri,
+  aplicația pornește verde (`Started CreatorHubApplication`).
+- [ ] **Faza 2 (următoarea) — Repository-uri** (Spring Data JPA), apoi servicii,
   controllere REST, validare & handler global de erori, autentificare
   (Spring Security — abia în faza ei), apoi spargerea în microservicii,
   cache Redis, MongoDB, monitorizare, frontend React.
@@ -101,3 +108,46 @@ docker compose up -d            # pornește PostgreSQL
   tranzacție în service, evităm anti-pattern-ul OSIV.
 - **2026-06-23 (Faza 0):** `ddl-auto=update` doar pentru development; înainte de
   producție trecem pe migrări versionate (Flyway/Liquibase).
+- **2026-06-23 (Faza 1):** Conflicte de port pe mașina de dev → PostgreSQL pe
+  host **5433** (exista deja un PostgreSQL 17 nativ pe 5432) și HTTP pe **8081**
+  (Oracle TNS listener ocupa 8080). Containerul folosește intern tot 5432.
+- **2026-06-23 (Faza 1):** Tabela entității `User` se numește `users` — `user`
+  e cuvânt rezervat în PostgreSQL.
+
+## 8. Model de date — convenții și decizii (Faza 1)
+
+7 entități în `com.creatorhub.model`, 2 enum-uri în `com.creatorhub.model.enums`.
+Descrierea completă (entități + relații) e în `README.md` → secțiunea *Data model*.
+
+- **ID-uri:** `Long`, `@GeneratedValue(strategy = IDENTITY)` (coloană identity în
+  Postgres). Simplu și predictibil; dacă va fi nevoie de batching la scriere,
+  reconsiderăm `SEQUENCE`.
+- **equals/hashCode:** bazate DOAR pe `id`, sigure la proxy Hibernate
+  (`Hibernate.getClass(this)` pentru comparația de tip; `hashCode` constant per
+  tip via `Hibernate.getClass(this).hashCode()`). Abordare unică și consistentă
+  pe toate entitățile.
+- **toString:** Lombok `@ToString`, dar TOATE câmpurile de relație marcate cu
+  `@ToString.Exclude` → fără recursivitate / StackOverflow și fără lazy-loading
+  accidental.
+- **Lombok:** `@Getter @Setter @ToString` (NU `@Data`, NU `@EqualsAndHashCode` —
+  equals/hashCode sunt scrise manual). Colecțiile inițializate (`new ArrayList`/
+  `HashSet`) ca să evităm NPE.
+- **Fetch:** `LAZY` pe toate `@ManyToOne`, `@OneToMany`, `@ManyToMany`. La
+  `@OneToOne`: owning side (`Profile`) `LAZY` + `optional=false`.
+- **Enum-uri:** `@Enumerated(EnumType.STRING)` (NU ORDINAL).
+- **Owning sides:**
+  - `User`↔`Profile` (1:1): **Profile** deține FK-ul (`@JoinColumn user_id`),
+    `User` are `mappedBy`.
+  - `Post`↔`Tag` (N:N): **Post** deține `@JoinTable(post_tags)`, `Tag` are
+    `mappedBy`.
+- **Cascade (decis per relație, nu „ALL peste tot"):**
+  - `User → Profile`: **ALL + orphanRemoval** (compoziție; ștergi userul → piere
+    profilul). Cerut explicit.
+  - `Post → Comment`: **ALL + orphanRemoval** (un comentariu nu există fără
+    postare; lifecycle-ul comentariului e deținut de Post, nu de autor).
+  - `Post → Tag` (N:N): **PERSIST + MERGE**, niciodată REMOVE (tag-urile sunt
+    partajate între postări — nu le ștergem când ștergem o postare).
+  - Restul `@OneToMany`/`@ManyToOne` (tiers, posts, subscriptions, author etc.):
+    **fără cascade** — ștergerea creatorului/fanului se va trata explicit în
+    business logic (faze viitoare), ca să nu cascadăm orbește peste entități
+    referite în altă parte. *(De confirmat când ajungem la ștergeri reale.)*

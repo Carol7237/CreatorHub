@@ -31,8 +31,11 @@ docker compose up -d
 ./mvnw spring-boot:run
 ```
 
-The application connects to PostgreSQL on `localhost:5432` (database `creatorhub`,
-user `creatorhub`, password `creatorhub` — development credentials only).
+The application connects to PostgreSQL on `localhost:5433` (host port mapped to
+the container's 5432; database `creatorhub`, user `creatorhub`, password
+`creatorhub` — development credentials only) and serves HTTP on port `8081`.
+Both ports avoid common dev-machine conflicts (a native PostgreSQL on 5432, an
+Oracle listener on 8080).
 
 ## Project layout
 
@@ -46,5 +49,54 @@ src/main/java/com/creatorhub
 ├── exception    # custom exceptions + global handler
 └── config       # Spring configuration
 ```
+
+## Data model (domain)
+
+The domain has **7 entities** plus one many-to-many join table (`post_tags`).
+Enums (`Role`, `SubStatus`) live in `com.creatorhub.model.enums` and are stored
+as strings.
+
+### Entities
+
+- **User** — the base account. The same account can act as both a creator and a
+  fan. Fields: `username` (unique), `email` (unique), `password` (will hold a
+  BCrypt hash from the Security phase), `role` (`USER` / `ADMIN`), `enabled`.
+  Mapped to the table `users` (`user` is a reserved word in PostgreSQL).
+- **Profile** — public profile data, kept separate from the account: `displayName`,
+  `bio` (up to ~1000 chars), `avatarUrl` (optional).
+- **SubscriptionTier** — a paid level offered by a creator (e.g. "Basic", "VIP"):
+  `name`, `priceMonthly` (`BigDecimal`, `numeric(10,2)`), `perks` (optional).
+- **Post** — a piece of content, free or premium: `title`, `body` (TEXT),
+  `premium` flag, `createdAt` (set on insert).
+- **Subscription** — a fan's subscription to a tier; a link entity with its own
+  data: `startDate` (set on insert), `status` (`ACTIVE` / `CANCELLED` / `EXPIRED`).
+- **Comment** — a comment on a post: `text`, `createdAt` (set on insert).
+- **Tag** — a label for posts: `name` (unique).
+
+### Relationships
+
+- **User 1—1 Profile.** A user has exactly one profile. *Profile* is the owning
+  side and holds the `user_id` FK (so `user_id` lives in the `profile` table).
+  Deleting a user deletes its profile (cascade + orphan removal).
+- **User 1—N SubscriptionTier.** As a creator, a user offers many tiers
+  (`subscription_tier.creator_id`).
+- **User 1—N Post.** As a creator, a user authors many posts (`post.author_id`).
+- **User 1—N Comment.** A user writes many comments (`comment.author_id`).
+- **User 1—N Subscription.** As a fan, a user holds many subscriptions
+  (`subscription.fan_id`).
+- **SubscriptionTier 1—N Subscription.** A tier has many subscriptions
+  (`subscription.tier_id`).
+- **SubscriptionTier 1—N Post.** A tier gates many posts (`post.tier_id`,
+  nullable — a free post has no tier).
+- **Post 1—N Comment.** A post has many comments (`comment.post_id`). Deleting a
+  post deletes its comments (cascade + orphan removal).
+- **Post N—N Tag.** Posts and tags relate many-to-many through the `post_tags`
+  join table. *Post* is the owning side (declares `@JoinTable`); *Tag* is the
+  inverse side (`mappedBy`).
+
+All `@ManyToOne`, `@OneToMany` and `@ManyToMany` associations are fetched
+**LAZY**. A diagram image will be added later; this is the textual ER reference.
+
+---
 
 See [CLAUDE.md](CLAUDE.md) for the full project guide, working rules and phase progress.
