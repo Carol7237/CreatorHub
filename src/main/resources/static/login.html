@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CreatorHub — Sign in</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 0 1rem; color: #1a1a1a; }
+        h1 { font-size: 1.4rem; } h2 { font-size: 1.05rem; margin-top: 2rem; }
+        fieldset { border: 1px solid #ddd; border-radius: 8px; margin: 1rem 0; padding: 1rem; }
+        label { display: block; margin: .5rem 0 .2rem; font-size: .85rem; }
+        input { width: 100%; padding: .5rem; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; }
+        .row { display: flex; align-items: center; gap: .5rem; margin-top: .6rem; }
+        .row input { width: auto; }
+        button { margin-top: .8rem; padding: .55rem 1rem; border: 0; border-radius: 6px; background: #4f46e5; color: #fff; cursor: pointer; }
+        #msg { margin-top: 1rem; padding: .6rem; border-radius: 6px; display: none; white-space: pre-wrap; font-size: .85rem; }
+        .ok { background: #ecfdf5; color: #065f46; } .err { background: #fef2f2; color: #991b1b; }
+    </style>
+</head>
+<body>
+<h1>CreatorHub</h1>
+<p>Custom login page (transitional). The React SPA will provide the primary login
+   experience in the Views phase, consuming the same <code>/api/auth</code> endpoints.</p>
+
+<fieldset>
+    <legend>Sign in</legend>
+    <label for="loginUsername">Username</label>
+    <input id="loginUsername" autocomplete="username">
+    <label for="loginPassword">Password</label>
+    <input id="loginPassword" type="password" autocomplete="current-password">
+    <div class="row"><input id="rememberMe" type="checkbox"><label for="rememberMe" style="margin:0">Remember me</label></div>
+    <button onclick="login()">Log in</button>
+    <button onclick="logout()" style="background:#6b7280">Log out</button>
+    <button onclick="whoami()" style="background:#0891b2">Who am I?</button>
+</fieldset>
+
+<h2>New here?</h2>
+<fieldset>
+    <legend>Register</legend>
+    <label for="regUsername">Username</label>
+    <input id="regUsername" autocomplete="username">
+    <label for="regEmail">Email</label>
+    <input id="regEmail" type="email" autocomplete="email">
+    <label for="regPassword">Password</label>
+    <input id="regPassword" type="password" autocomplete="new-password">
+    <button onclick="register()">Create account</button>
+</fieldset>
+
+<div id="msg"></div>
+
+<script>
+    // Same CSRF flow the React SPA will use: read the XSRF-TOKEN cookie that the
+    // server set on this page load, then echo it in the X-XSRF-TOKEN header.
+    function readCookie(name) {
+        return document.cookie.split('; ').find(c => c.startsWith(name + '='))?.split('=')[1];
+    }
+
+    async function api(path, body) {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = readCookie('XSRF-TOKEN');
+        if (token) headers['X-XSRF-TOKEN'] = decodeURIComponent(token);
+        const res = await fetch(path, {
+            method: 'POST', headers, credentials: 'same-origin',
+            body: body ? JSON.stringify(body) : undefined
+        });
+        const text = await res.text();
+        return { ok: res.ok, status: res.status, body: text };
+    }
+
+    function show(ok, text) {
+        const el = document.getElementById('msg');
+        el.className = ok ? 'ok' : 'err';
+        el.style.display = 'block';
+        el.textContent = text;
+    }
+
+    async function login() {
+        const r = await api('/api/auth/login', {
+            username: document.getElementById('loginUsername').value,
+            password: document.getElementById('loginPassword').value,
+            rememberMe: document.getElementById('rememberMe').checked
+        });
+        show(r.ok, (r.ok ? 'Logged in:\n' : 'Login failed (' + r.status + '):\n') + r.body);
+    }
+
+    async function register() {
+        const r = await api('/api/auth/register', {
+            username: document.getElementById('regUsername').value,
+            email: document.getElementById('regEmail').value,
+            password: document.getElementById('regPassword').value
+        });
+        show(r.ok, (r.ok ? 'Registered:\n' : 'Registration failed (' + r.status + '):\n') + r.body);
+    }
+
+    async function logout() {
+        const r = await api('/api/auth/logout');
+        show(r.ok, r.ok ? 'Logged out.' : 'Logout failed (' + r.status + ')');
+    }
+
+    async function whoami() {
+        const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        const text = await res.text();
+        show(res.ok, (res.ok ? 'Current user:\n' : 'Not authenticated (' + res.status + ')\n') + text);
+    }
+</script>
+</body>
+</html>
