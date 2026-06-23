@@ -35,6 +35,9 @@ bin/
 ### VS Code ###
 .vscode/
 
+### Claude Code local tooling (preview launch config) ###
+.claude/
+
 ### NetBeans ###
 nbproject/private/
 nbbuild/
