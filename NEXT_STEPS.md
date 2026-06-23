@@ -203,6 +203,21 @@ Commit-uri mici: `feat(eureka): ...`, `feat(gateway): ...`, `feat(probe): ...`.
    > - **Verificat:** stivă healthy, gating inter-service prin gateway Docker, scheme separate în
    >   containerul DB, `docker compose down` curat, ȘI rularea locală pe profil dev încă merge.
    > - Asta acoperă pasul 9 de mai jos pentru backend; se EXTINDE când adăugăm Redis/Mongo/Prometheus.
+
+   > ### ✅ PASUL 5 — Notification Service + MongoDB COMPLET (2026-06-23)
+   > Al 4-lea serviciu de business, pe **MongoDB** (bifează NoSQL). Detalii: **CLAUDE.md §20**. Pe scurt:
+   > - **`notification-service`** (port **8095**, MongoDB `notifications_db`): document `Notification`
+   >   (recipientId, type, message, actorId, relatedId, read, createdAt); endpoint-uri user
+   >   (list/unread-count/read/read-all) + intern `POST /internal/notifications`.
+   > - **Generare la evenimente** prin **Feign** (sincron, NU broker): subscription→notification la
+   >   abonare (NEW_SUBSCRIBER), content→notification la comentariu (NEW_COMMENT), cu Resilience4j
+   >   **fallback FAIL-OPEN** (notificarea e best-effort — eșecul NU blochează abonarea/comentariul;
+   >   opusul gating-ului fail-closed).
+   > - **MongoDB în compose** (`mongo:7`, host 27018:27017 — mongod nativ pe 27017); env
+   >   `SPRING_DATA_MONGODB_URI` în Docker, `localhost:27017` local. Rută gateway `/api/notifications/**`.
+   > - **Verificat în Docker:** notificări la abonare+comentariu, unread-count, mark-read, **test fail-open**
+   >   (notification oprit → comentariul tot reușește, 201), documente în Mongo. **68 teste verzi** (+7 notification).
+   > - Acoperă pasul 7 (MongoDB — Notification) de mai jos.
 3. **Config Server** (`spring-cloud-config-server`) — externalizează `application.yml`-urile
    (porturi, datasource, secrete) într-un repo de config (Git sau `native`).
 4. **Resilience4j** pe apelurile cross-service (mai ales gating-ul premium): circuit

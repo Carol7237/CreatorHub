@@ -44,11 +44,13 @@ Oracle listener on 8080).
 > with one command. Full design in [CLAUDE.md](CLAUDE.md) §16–§19.
 
 Services: **Eureka** (discovery, `:8761`) · **API Gateway** (single entry point, `:8085`) ·
-**user-service** · **subscription-service** · **content-service** · **PostgreSQL**
-(each service owns its own schema: `users_svc`, `subs_svc`, `content_svc`). Premium
-gating is an inter-service call (Content → Subscription) protected by a Resilience4j
-circuit breaker; the gateway authenticates the session and forwards a trusted identity
-header to the stateless downstream services.
+**user-service** · **subscription-service** · **content-service** · **notification-service** ·
+**PostgreSQL** (each relational service owns its own schema: `users_svc`, `subs_svc`,
+`content_svc`) · **MongoDB** (NoSQL, for notification-service — `notifications_db`). Premium
+gating is an inter-service call (Content → Subscription) protected by a Resilience4j circuit
+breaker (fail-closed); notifications are fired on subscribe/comment events (Subscription/Content
+→ Notification) with a fail-open circuit breaker (best-effort). The gateway authenticates the
+session and forwards a trusted identity header to the stateless downstream services.
 
 ```bash
 # Build + run the entire backend stack (one command):

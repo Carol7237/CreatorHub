@@ -209,8 +209,18 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
     (suprascriu profilul `dev` → rularea locală neatinsă). Actuator adăugat pt healthcheck.
     Validat: stivă healthy, gating inter-service prin gateway Docker, scheme separate în
     containerul DB, rularea locală (dev/localhost:5433) încă merge. Detalii §19.
-  - [ ] **Pasul 5+ — Notification Service** (MongoDB), apoi Config Server, monitoring
-    (Prometheus/Grafana), Redis, JWT distribuit, deploy. Vezi `NEXT_STEPS.md` §5.
+  - [x] **Pasul 5 — Notification Service + MongoDB (COMPLET, 2026-06-23):** al 4-lea
+    serviciu de business, pe **MongoDB** (bifează cerința NoSQL). Modul
+    `services/notification-service` (port **8095**, DB **`notifications_db`**). Notificările
+    se generează la evenimente prin **apel inter-service Feign** (subscription→notification
+    la abonare = NEW_SUBSCRIBER; content→notification la comentariu = NEW_COMMENT), protejat
+    de Resilience4j cu **fallback FAIL-OPEN** (notificarea e best-effort — eșecul ei NU
+    blochează abonarea/comentariul; opusul gating-ului fail-closed). MongoDB adăugat în compose.
+    **68 teste verzi** (+7 notification). Validat în Docker: notificări la abonare/comentariu,
+    unread-count, mark-read, **test fail-open** (notification oprit → comentariul tot reușește),
+    documente în Mongo. Detalii §20.
+  - [ ] **Pasul 6+ — Config Server**, monitoring (Prometheus/Grafana), Redis, JWT
+    distribuit, deploy. Vezi `NEXT_STEPS.md` §5.
 
 ## 6. Comenzi utile
 
@@ -909,3 +919,63 @@ docker compose -f services/docker-compose.yml down              # oprește tot (
 - **Prin gateway Docker (8085):** register/login → tier (creatorId=2) → post premium → abonare → **gating: fan abonat vede body, anonim locked** (apelul inter-service merge în rețeaua Docker).
 - Scheme separate în containerul DB: `users_svc`/`subs_svc`/`content_svc` (8 tabele).
 - **Rularea locală** (profil dev, `localhost:5433`) confirmată funcțională în paralel. `docker compose down` curat.
+
+## 20. Microservicii — Notification Service + MongoDB (Faza 8, Pasul 5)
+
+> Ramura `microservices`. Monolitul de pe `main` NEATINS. Al 4-lea serviciu de business,
+> pe **MongoDB** — bifează cerința opțională NoSQL.
+
+### Notification Service (`services/notification-service`, port 8095, MongoDB `notifications_db`)
+NoSQL prin **`spring-boot-starter-data-mongodb`** (NU JPA). Document `Notification` (`@Document`):
+`id` (String, ObjectId Mongo), `recipientId` (Long — cine primește, indexat), `type`
+(`NEW_SUBSCRIBER`/`NEW_COMMENT`), `message`, `actorId` (cine a declanșat), `relatedId`
+(post/tier), `read` (bool), `createdAt` (Instant). `NotificationRepository extends MongoRepository`.
+Securitate stateless header-based (ca celelalte downstream). Endpoint-uri:
+- `GET /api/notifications` (ale userului curent, paginat, newest-first; `PagedResponse` din common merge și cu Mongo `Page`),
+- `GET /api/notifications/unread-count`, `POST /api/notifications/{id}/read`, `POST /api/notifications/read-all`,
+- **intern:** `POST /internal/notifications` (creare; sub `/internal/**`, NErutат de gateway).
+
+Userul vede DOAR notificările lui (`recipientId == viewer`); ADMIN poate vedea orice.
+
+### Generarea notificărilor — apel inter-service (decizia: sincron Feign, NU broker)
+Notificările se creează la evenimente, prin **apel inter-service Feign** (`lb://notification-service`,
+`POST /internal/notifications`):
+- **subscription-service** la abonare → `NEW_SUBSCRIBER` către `tier.creatorId` (actor = fan).
+- **content-service** la comentariu → `NEW_COMMENT` către `post.authorId` (actor = comentator; sărim self-comment).
+
+Ambele au `NotificationClient` (Feign) + `NotificationPublisher` (împachetează apelul în
+**Resilience4j circuit breaker**). *Decizia sincron vs event-driven (RabbitMQ/Kafka): am ales
+sincron Feign (pragmatic, refolosește pattern-ul de reziliență); mesageria async = fază ulterioară
+opțională dacă vrem „event-driven" pur.*
+
+### FAIL-OPEN vs fail-closed (decizia cheie)
+Fallback-ul notificărilor e **FAIL-OPEN**: dacă notification-service e jos/lent, apelul eșuează
+**silențios** (doar log WARN) și operația principală (abonare/comentariu) **reușește oricum**.
+Contrast cu **gating-ul premium** (Pasul 3) care e **fail-closed** (în dubiu, blochează). Rațiune:
+o notificare ratată e inofensivă, dar o abonare blocată de un serviciu de notificări căzut ar fi
+inacceptabilă. *Best-effort.* (Notă: apelul se face în fluxul tranzacției `create`; fallback-ul nu
+aruncă → nu face rollback. Mutarea pe eveniment after-commit = rafinare ulterioară.)
+
+### MongoDB în stivă + rulare locală
+`docker-compose.yml` (stivă): serviciu **mongodb** (`mongo:7`, volum, healthcheck `mongosh ping`),
+host **27018:27017** (un `mongod` nativ poate ține 27017; serviciile folosesc intern `mongodb:27017`).
+notification-service în Docker: `SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/notifications_db`
+(env, suprascrie profilul `dev`). **Rulare locală:** profil `dev` → `mongodb://localhost:27017/...`
+(am adăugat și `mongodb` în root `docker-compose.yml` ca infra de dev; pe mașina asta există deja un
+`mongod` nativ pe 27017). Gateway: rută `/api/notifications/**` → `lb://notification-service`.
+
+### Verificat în Docker (2026-06-23)
+- Build (6 imagini) + `up` → **8 containere healthy** (postgres, mongo, eureka, user, subscription,
+  content, notification, gateway).
+- **Notificări la evenimente:** fan (id 5) se abonează → creator (id 4) primește **NEW_SUBSCRIBER**;
+  fan comentează postarea premium → creator primește **NEW_COMMENT**. `GET /api/notifications` (creator)
+  → ambele; `unread-count`=2; `mark-read` → unread=1.
+- **TEST FAIL-OPEN:** notification-service oprit → fan comentează din nou → **comment HTTP 201**
+  (operația reușește), notificarea abandonată (log: `Notification dispatch failed (best-effort, ignored)`),
+  niciun document creat pt acel eveniment.
+- **MongoDB:** documentele `notifications` există (ObjectId-uri, `recipientId`/`actorId` Long).
+- **Rularea locală** (notification-service profil dev → `localhost:27017` mongod nativ) confirmată.
+
+### Rămas (Pasul 6+)
+Config Server, monitoring (Prometheus/Grafana — actuator e gata), Redis (cache), JWT distribuit,
+containerizare frontend, deploy. Monolitul se curăță DOAR la final.
