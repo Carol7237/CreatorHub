@@ -219,8 +219,15 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
     **68 teste verzi** (+7 notification). Validat în Docker: notificări la abonare/comentariu,
     unread-count, mark-read, **test fail-open** (notification oprit → comentariul tot reușește),
     documente în Mongo. Detalii §20.
-  - [ ] **Pasul 6+ — Config Server**, monitoring (Prometheus/Grafana), Redis, JWT
-    distribuit, deploy. Vezi `NEXT_STEPS.md` §5.
+  - [x] **Pasul 6 — Monitoring Prometheus + Grafana (COMPLET, 2026-06-23):** bifează
+    cerința de monitorizare. `micrometer-registry-prometheus` în toate cele 6 servicii →
+    `/actuator/prometheus`; **Prometheus** (9090) scrape la toate (target-uri prin nume de
+    container), **Grafana** (3000, admin/admin) cu datasource + dashboard provizionate automat.
+    Validat în Docker: toate target-urile UP, metrici reale din trafic (request rate, latențe,
+    JVM), și **starea circuit breaker** (`resilience4j_circuitbreaker_state`) trecând closed→open
+    când subscription e oprit. Detalii §21.
+  - [ ] **Pasul 7+ — Config Server**, Redis (cache), JWT distribuit, containerizare frontend,
+    deploy. Vezi `NEXT_STEPS.md` §5.
 
 ## 6. Comenzi utile
 
@@ -979,3 +986,57 @@ notification-service în Docker: `SPRING_DATA_MONGODB_URI=mongodb://mongodb:2701
 ### Rămas (Pasul 6+)
 Config Server, monitoring (Prometheus/Grafana — actuator e gata), Redis (cache), JWT distribuit,
 containerizare frontend, deploy. Monolitul se curăță DOAR la final.
+
+## 21. Microservicii — Monitoring: Prometheus + Grafana (Faza 8, Pasul 6)
+
+> Ramura `microservices`. Monolitul de pe `main` NEATINS. Bifează cerința opțională de
+> monitorizare. Fundația (Actuator) era deja în toate serviciile din Pasul 4.
+
+### Expunerea metricilor (Micrometer + Actuator)
+`io.micrometer:micrometer-registry-prometheus` (runtime) în toate cele 6 servicii (eureka,
+gateway, user, subscription, content, notification) → Actuator expune **`/actuator/prometheus`**
+în format Prometheus. Config în fiecare `application.yml`:
+`management.endpoints.web.exposure.include=health,info,prometheus,metrics` +
+`management.metrics.tags.application=${spring.application.name}` (tag comun ca să distingem
+serviciile în PromQL/Grafana). **Securitate:** `/actuator/**` NU e rutат de gateway → endpoint-urile
+de metrici sunt accesibile DOAR în rețeaua internă Docker (Prometheus le scrape-uiește direct prin
+numele de container), nu public. (Pe serviciile downstream stateless, `/actuator/**` cade pe
+`anyRequest().permitAll()` — intern e ok.)
+
+### Prometheus (port 9090)
+Serviciu `prometheus` (`prom/prometheus:latest`) în `services/docker-compose.yml`, cu
+`services/monitoring/prometheus/prometheus.yml` montat. Scrape jobs pentru fiecare serviciu prin
+**numele de container + portul intern + `/actuator/prometheus`** (ex. `user-service:8092`), interval 15s.
+Status → Targets: toate **UP**.
+
+### Grafana (port 3000, admin/admin)
+Serviciu `grafana` (`grafana/grafana:latest`), **provisioning automat** la pornire (fără config manual):
+- `monitoring/grafana/provisioning/datasources/datasource.yml` → datasource **Prometheus** (uid `prometheus`, `http://prometheus:9090`, default).
+- `monitoring/grafana/provisioning/dashboards/provider.yml` → încarcă dashboard-urile din `/var/lib/grafana/dashboards`.
+- `monitoring/grafana/dashboards/creatorhub-overview.json` → dashboard **CreatorHub — Microservices Overview**
+  cu panouri: Targets UP, **HTTP request rate / serviciu**, **p95 latency**, **JVM heap / serviciu**,
+  **Resilience4j circuit breaker state**.
+Credențiale dev `admin/admin` (`GF_SECURITY_ADMIN_*`); de schimbat în prod.
+
+### Metrici interesante disponibile
+`http_server_requests_seconds_*` (rate, p95 latency, prin `application`), `jvm_memory_used_bytes`,
+`jvm_threads_*`, `process_cpu_usage`, `up` (per target), și **`resilience4j_circuitbreaker_state`**
++ `resilience4j_circuitbreaker_calls_seconds_count{kind=successful|failed}` (din integrarea
+Spring Cloud CircuitBreaker ↔ Micrometer; breaker-ele se creează lazy la prima folosire).
+
+### Verificat în Docker (2026-06-23)
+- Stivă completă healthy + `prometheus` + `grafana` pornite. Porturi host: **9090** (Prometheus), **3000** (Grafana).
+- Prometheus targets: `eureka/api-gateway/user/subscription/content/notification` toate **UP** (+ prometheus self).
+- Trafic generat prin gateway → metrici reale: `http_server_requests_seconds_count` pe `application`
+  (eureka 64, gateway 46, user 32, notification 21, content 19, subscription 11).
+- Grafana: datasource Prometheus + dashboard `creatorhub-overview` provizionate (confirmat prin API).
+- **Demo circuit breaker:** gating declanșat → breaker `subscriptionAccess` `state=closed`; după oprirea
+  subscription-service + 12 apeluri → **`state=open`=1** (calls failed=5), iar postul tot servit **HTTP 200**
+  (fail-closed, nu 500). Tranziția closed→open vizibilă în Prometheus/Grafana.
+- **Rularea locală** (user-service profil dev → `localhost:5433`; `/actuator/prometheus` local → 200) confirmată.
+
+### Comenzi monitoring
+- Prometheus: `http://localhost:9090` (Status → Targets). Grafana: `http://localhost:3000` (admin/admin).
+
+### Rămas (Pasul 7+)
+Config Server, Redis (cache pe gating/display), JWT distribuit, containerizare frontend, deploy.

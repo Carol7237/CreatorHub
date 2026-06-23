@@ -218,6 +218,18 @@ Commit-uri mici: `feat(eureka): ...`, `feat(gateway): ...`, `feat(probe): ...`.
    > - **Verificat în Docker:** notificări la abonare+comentariu, unread-count, mark-read, **test fail-open**
    >   (notification oprit → comentariul tot reușește, 201), documente în Mongo. **68 teste verzi** (+7 notification).
    > - Acoperă pasul 7 (MongoDB — Notification) de mai jos.
+
+   > ### ✅ PASUL 6 — Monitoring Prometheus + Grafana COMPLET (2026-06-23)
+   > Bifează cerința de monitorizare. Detalii: **CLAUDE.md §21**. Pe scurt:
+   > - **`micrometer-registry-prometheus`** în toate cele 6 servicii → `/actuator/prometheus`
+   >   (`management.endpoints.web.exposure.include=health,info,prometheus,metrics` +
+   >   tag `application`). `/actuator/**` NU e rutат de gateway → metrici doar intern.
+   > - **Prometheus** (9090, `services/monitoring/prometheus/prometheus.yml`) scrape la toate
+   >   serviciile prin numele de container. **Grafana** (3000, admin/admin) cu datasource +
+   >   dashboard **provizionate automat** (`services/monitoring/grafana/...`).
+   > - **Verificat:** toate target-urile UP; metrici reale din trafic (request rate, p95, JVM);
+   >   **circuit breaker** `resilience4j_circuitbreaker_state` closed→**open** când subscription
+   >   e oprit (postul tot servit 200). Acoperă pasul 5 (Monitoring) de mai jos.
 3. **Config Server** (`spring-cloud-config-server`) — externalizează `application.yml`-urile
    (porturi, datasource, secrete) într-un repo de config (Git sau `native`).
 4. **Resilience4j** pe apelurile cross-service (mai ales gating-ul premium): circuit

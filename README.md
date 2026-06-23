@@ -70,6 +70,20 @@ healthchecks (Postgres → Eureka → services → gateway).
 > Docker, profile `dev`) still uses `localhost:5433` / `localhost:8761` — the two modes
 > coexist. The React frontend is not containerized yet (run it separately, see below).
 
+### Monitoring (Prometheus + Grafana)
+
+The stack ships with monitoring. Every service exposes metrics via Spring Boot
+Actuator + Micrometer at `/actuator/prometheus` (internal only — not routed by the
+gateway). **Prometheus** scrapes all services; **Grafana** visualizes them with an
+auto-provisioned data source and dashboard.
+
+- **Prometheus** — `http://localhost:9090` (Status → Targets shows every service `UP`).
+- **Grafana** — `http://localhost:3000`, login `admin` / `admin` (dev only). The
+  "CreatorHub — Microservices Overview" dashboard is provisioned automatically: HTTP
+  request rate and p95 latency per service, JVM heap, and the Resilience4j circuit
+  breaker state. Stop `subscription-service` and hit a premium post to watch the
+  `subscriptionAccess` breaker flip from closed to open in real time.
+
 ## Frontend (React SPA)
 
 A separate React + TypeScript + Vite app lives in [`frontend/`](frontend). It is
