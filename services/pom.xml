@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Spring Boot parent: aligns Spring Boot managed dependency versions for
+         every microservice module. Same Boot version as the monolith (3.5.15). -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.15</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+
+    <groupId>com.creatorhub</groupId>
+    <artifactId>creatorhub-services</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>CreatorHub Services (parent)</name>
+    <description>Multi-module parent for the CreatorHub Spring Cloud microservices.
+        Centralizes the Java version, the Spring Cloud BOM and shared plugin config.</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <!-- Spring Cloud release train compatible with Spring Boot 3.5.x.
+             Verified against Maven Central (2025.0.0, "Northfields").
+             NOTE: Spring Cloud 2024.0.x ("Moorgate") targets Boot 3.4.x, NOT 3.5.x. -->
+        <spring-cloud.version>2025.0.0</spring-cloud.version>
+    </properties>
+
+    <!-- Microservice modules. The legacy monolith (/src + root pom.xml) is left
+         UNTOUCHED and is intentionally NOT a module here (see NEXT_STEPS.md). -->
+    <modules>
+        <module>eureka-server</module>
+        <module>api-gateway</module>
+        <module>probe-service</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Cloud BOM: import-scope so every module gets aligned
+                 Spring Cloud versions (Eureka, Gateway, ...) without declaring them. -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+</project>
