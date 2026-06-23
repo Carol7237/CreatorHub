@@ -38,6 +38,7 @@
         <module>user-service</module>
         <module>subscription-service</module>
         <module>content-service</module>
+        <module>notification-service</module>
     </modules>
 
     <dependencyManagement>

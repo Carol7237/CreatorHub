@@ -1,0 +1,7 @@
+# DEV profile — local MongoDB. Run a MongoDB container for local development, e.g.
+# the one in the root docker-compose.yml (mongodb on host 27017), then start this
+# service on the dev profile. In Docker the URI is overridden by SPRING_DATA_MONGODB_URI.
+spring:
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/notifications_db

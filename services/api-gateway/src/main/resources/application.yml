@@ -25,6 +25,11 @@ spring:
               uri: lb://content-service
               predicates:
                 - Path=/api/posts/**,/api/comments/**,/api/tags/**
+            # Notifications bounded context (the /internal/** create endpoint is NOT routed).
+            - id: notification-service
+              uri: lb://notification-service
+              predicates:
+                - Path=/api/notifications/**
 
 server:
   port: 8085   # 8080 is taken by Oracle TNS listener (TNSLSNR) on this machine.

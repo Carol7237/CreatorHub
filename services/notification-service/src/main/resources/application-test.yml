@@ -1,0 +1,6 @@
+# TEST profile — no external infrastructure. The business logic is covered by pure
+# Mockito unit tests (the Mongo repository is mocked), so no MongoDB / no Spring
+# context is started during the build. Eureka is disabled for safety.
+eureka:
+  client:
+    enabled: false
