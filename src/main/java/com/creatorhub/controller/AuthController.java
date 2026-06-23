@@ -10,6 +10,8 @@ import com.creatorhub.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
+import org.springframework.security.web.csrf.CsrfToken;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -45,9 +47,19 @@ public class AuthController {
     private final SecurityContextRepository securityContextRepository;
     private final RememberMeServices rememberMeServices;
 
+    /**
+     * Returns the CSRF token so a cross-origin SPA can read it from the response
+     * body (instead of the cookie) and echo it in the X-XSRF-TOKEN header.
+     * The CsrfCookieFilter also sets the XSRF-TOKEN cookie on this request.
+     */
+    @GetMapping("/csrf")
+    public CsrfToken csrf(CsrfToken token) {
+        return token;
+    }
+
     /** Self-registration. Always creates a USER (never ADMIN). */
     @PostMapping("/register")
-    public ResponseEntity<UserResponse> register(@RequestBody RegisterRequest request) {
+    public ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
         UserRequest userRequest = UserRequest.builder()
                 .username(request.getUsername())
                 .email(request.getEmail())
@@ -61,7 +73,7 @@ public class AuthController {
 
     /** Programmatic login that establishes an HTTP session (and optional remember-me cookie). */
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody LoginRequest request,
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request,
                                    HttpServletRequest httpRequest,
                                    HttpServletResponse httpResponse) {
         try {

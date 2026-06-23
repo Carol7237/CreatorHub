@@ -5,25 +5,55 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * Global exception -> JSON mapping for the API, per CLAUDE.md §9. This is also
- * the home of ERROR-level logging for unexpected failures (Phase 5 logging):
- * client/domain errors are logged at WARN (they are not server faults), while
- * truly unexpected exceptions are logged at ERROR (and land in the dedicated
- * error log file).
- *
- * <p>The Views phase will extend this with input-validation handling
- * (e.g. {@code MethodArgumentNotValidException} -> 400 with field errors).
+ * Global exception -> JSON mapping for the API, per CLAUDE.md §9, using the
+ * shared {@link ApiErrorResponse}. Client/domain errors are logged at WARN; truly
+ * unexpected exceptions at ERROR (dedicated error log). Bean Validation failures
+ * become 400 with per-field messages.
  */
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
+
+    /** @Valid failures on a @RequestBody -> 400 with a field -> message map. */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiErrorResponse> handleValidation(MethodArgumentNotValidException ex,
+                                                             HttpServletRequest request) {
+        Map<String, String> fieldErrors = new LinkedHashMap<>();
+        for (FieldError fe : ex.getBindingResult().getFieldErrors()) {
+            fieldErrors.putIfAbsent(fe.getField(),
+                    fe.getDefaultMessage() != null ? fe.getDefaultMessage() : "invalid");
+        }
+        log.warn("400 {} {} -> validation failed: {}", request.getMethod(), request.getRequestURI(), fieldErrors);
+        ApiErrorResponse body = ApiErrorResponse.builder()
+                .timestamp(Instant.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                .message("Validation failed")
+                .path(request.getRequestURI())
+                .fieldErrors(fieldErrors)
+                .build();
+        return ResponseEntity.badRequest().body(body);
+    }
+
+    /** Malformed/unreadable JSON body -> 400 (resolves the Phase 5 limitation of returning 500). */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiErrorResponse> handleNotReadable(HttpMessageNotReadableException ex,
+                                                             HttpServletRequest request) {
+        log.warn("400 {} {} -> malformed request body", request.getMethod(), request.getRequestURI());
+        return build(HttpStatus.BAD_REQUEST, "Malformed JSON request body", request);
+    }
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleNotFound(ResourceNotFoundException ex, HttpServletRequest request) {
