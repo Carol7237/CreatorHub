@@ -43,6 +43,7 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
 - Profiluri Spring: `dev` (PostgreSQL/Docker) și `test` (H2 in-memory) — vezi §10.
 - Securitate: Spring Security (sesiune, BCrypt, CSRF, roluri) — vezi §11.
 - Paginare/sortare (`PagedResponse`) + logging (Logback, AOP) — vezi §12.
+- Testare: JaCoCo + unit (Mockito) + integration (H2); 89 teste — vezi §13.
 - Build tool: Maven (NU Gradle)
 
 ## 3. Reguli de lucru (valabile pentru tot proiectul)
@@ -112,7 +113,11 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   nivele per profil; `@Slf4j` în service, aspect AOP de logging, `GlobalExceptionHandler`
   (ERROR pentru erori neașteptate). Verificat: **25 teste** verzi + logging la
   runtime. Detalii în §12.
-- [ ] **Faza 6 (următoarea) — Views / REST:** controllere REST pentru restul
+- [x] **Faza 6 — Testing (COMPLETĂ, 2026-06-23):** JaCoCo (raport + gate 70% pe
+  `service.impl`); **55 unit tests** Mockito izolate (7 service impls) + 25 teste
+  de integrare (H2). Coverage service layer: **89.1% line** (gate trece). Total
+  **89 teste** verzi. Detalii în §13.
+- [ ] **Faza 7 (următoarea) — Views / REST:** controllere REST pentru restul
   entităților, Bean Validation pe DTO-uri, extinderea `GlobalExceptionHandler`
   (validare input → 400 cu erori pe câmpuri), apoi microservicii, cache Redis,
   MongoDB, monitorizare, React.
@@ -376,7 +381,47 @@ e în `.gitignore`.
   invalid) dă momentan 500, nu 400 — Faza Views adaugă handler-ul de validare.*
 
 ### Verificat
-- 25 teste verzi pe H2 (`PaginationSortingTests` 6 + securitate 10 + Faza 2 9).
+- 25 teste verzi pe H2 (paginare 6 + securitate 10 + flux business 9).
 - Runtime dev: INFO `User created: id=.. username=..` (fără parolă) în
   `creatorhub.log`, AOP DEBUG `call/done ...() [N args] in X ms`; `creatorhub-error.log`
   conține DOAR ERROR (0 INFO/WARN). Eroare provocată: JSON malformat → 500 ERROR.
+
+## 13. Testare (Faza 6)
+
+**89 teste**, două categorii clar separate:
+
+### Unit tests (Mockito, FĂRĂ Spring/DB) — 55 teste
+`*ServiceImplTest` în `src/test/java/com/creatorhub/service/impl/`. Folosesc
+`@ExtendWith(MockitoExtension.class)`, `@Mock` pe repository-uri/`PasswordEncoder`,
+`@InjectMocks` pe `ServiceImpl`. Rapide, izolate, **nu ating baza de date**. Câte
+unul per service impl: User (12), Post (13), Subscription (9), SubscriptionTier
+(12), Comment (6), Tag (7), Profile (5). Acoperă căi fericite + reguli de business
+(parolă encodată, profil auto-creat, duplicate, premium/tier, auto-abonare, preț
+≤ 0, delete blocat etc.).
+
+### Integration tests (`@SpringBootTest`, H2) — 25 teste, ≥3 scenarii end-to-end
+`*IntegrationTest` (+ `SecurityIntegrationTests`) pe profilul `test` (H2, fără
+Docker). Cele **3 scenarii end-to-end**:
+1. **`BusinessFlowIntegrationTest`** (9): creator → tier → post premium → fan se
+   abonează → comentariu; + regulile de business prin tot stack-ul de service.
+2. **`SecurityIntegrationTests`** (10): autentificare + autorizare pe rol (login,
+   acces protejat 401, admin 200 vs user 403, CSRF, remember-me).
+3. **`PaginationSortingIntegrationTest`** (6): paginare + sortare end-to-end.
+
+### Separarea bazei de date
+- **Unit** = fără DB (Mockito mock-uiește repository-urile).
+- **Integration** = H2 in-memory (profil `test`, `@ActiveProfiles("test")`), fără Docker.
+
+### Coverage (JaCoCo)
+- Plugin JaCoCo: raport HTML la `mvn test` (`target/site/jacoco/index.html`) +
+  **gate de 70% line coverage pe `com.creatorhub.service.impl`** la `mvn verify`.
+- **Coverage service layer atins: 89.1% line** (244/274), branch 66.9%. Per clasă
+  toate ≥ 82%. `mvn verify` trece (gate-ul de 70% e respectat).
+- **Excluse din coverage** (nu conțin logică de business reală): entități (`model`),
+  DTO-uri + mappere (`dto`), config + seeder (`config`), wiring de securitate
+  (`security`), aspectul AOP (`aspect`), clasa main, și clasele simple de excepție
+  (`*Exception`). Astfel coverage-ul reflectă logica reală din service layer.
+
+### Comenzi
+- `./mvnw clean test` → toate testele + raport coverage.
+- `./mvnw clean verify` → în plus, gate-ul de coverage (eșuează dacă service < 70%).

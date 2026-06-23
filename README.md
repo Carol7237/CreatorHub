@@ -117,6 +117,29 @@ Levels per profile: `dev` logs `com.creatorhub` at `DEBUG`; `test` is quiet
 (`WARN`, console only). An AOP aspect logs service method entry/exit and timing at
 `DEBUG`. Passwords and tokens are **never** logged.
 
+## Testing
+
+89 tests, in two clearly separated kinds (all run with `./mvnw test`, no Docker):
+
+- **Unit tests** (`*ServiceImplTest`) — JUnit 5 + Mockito, no Spring context and
+  **no database** (repositories are mocked). One per service implementation.
+- **Integration tests** (`*IntegrationTest`) — `@SpringBootTest` on the `test`
+  profile against **H2 in-memory**. Three end-to-end scenarios: the business flow
+  (creator → tier → premium post → subscribe → comment), security/authorization,
+  and pagination/sorting.
+
+```bash
+./mvnw clean test       # run all tests + generate the coverage report
+./mvnw clean verify     # also enforce the 70% service-layer coverage gate
+```
+
+Coverage is measured with **JaCoCo**. The HTML report is at
+`target/site/jacoco/index.html`. The service layer (`com.creatorhub.service.impl`)
+is at **~89% line coverage**, and `mvn verify` fails the build if it drops below
+70%. Non-logic classes (entities, DTOs/mappers, config, security wiring, the AOP
+aspect, the main class, simple exceptions) are excluded so the number reflects
+real business logic.
+
 ## Project layout
 
 ```
