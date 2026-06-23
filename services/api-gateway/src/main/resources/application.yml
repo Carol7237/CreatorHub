@@ -13,6 +13,18 @@ spring:
               uri: lb://user-service
               predicates:
                 - Path=/api/auth/**,/api/creators/**,/api/profiles/**,/api/admin/**
+            # Subscriptions bounded context: tiers + subscriptions.
+            # (the internal /internal/** access endpoint is NOT routed here — it is
+            #  reached service-to-service only.)
+            - id: subscription-service
+              uri: lb://subscription-service
+              predicates:
+                - Path=/api/tiers/**,/api/subscriptions/**
+            # Content bounded context: posts (incl. /{id}/comments), comments, tags.
+            - id: content-service
+              uri: lb://content-service
+              predicates:
+                - Path=/api/posts/**,/api/comments/**,/api/tags/**
 
 server:
   port: 8085   # 8080 is taken by Oracle TNS listener (TNSLSNR) on this machine.

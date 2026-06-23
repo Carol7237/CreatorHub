@@ -36,6 +36,8 @@
         <module>eureka-server</module>
         <module>api-gateway</module>
         <module>user-service</module>
+        <module>subscription-service</module>
+        <module>content-service</module>
     </modules>
 
     <dependencyManagement>
