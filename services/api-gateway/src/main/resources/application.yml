@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Explicit routes. lb:// = resolve the target through Eureka and
+          # load-balance across its instances (Spring Cloud LoadBalancer).
+          routes:
+            - id: probe-service
+              uri: lb://probe-service
+              predicates:
+                - Path=/api/probe/**
+
+server:
+  port: 8085   # 8080 is taken by Oracle TNS listener (TNSLSNR) on this machine.
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true

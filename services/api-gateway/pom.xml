@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.creatorhub</groupId>
+        <artifactId>creatorhub-services</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>api-gateway</artifactId>
+    <name>CreatorHub API Gateway</name>
+    <description>Single entry point. Routes requests to backend services discovered
+        through Eureka, load-balanced via Spring Cloud LoadBalancer (lb://).</description>
+
+    <dependencies>
+        <!-- Reactive Spring Cloud Gateway (WebFlux/Netty). In Spring Cloud 2025.0.0
+             this is the non-deprecated starter; the old "spring-cloud-starter-gateway"
+             is deprecated in favour of the -server-webflux / -server-webmvc variants. -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
+        </dependency>
+
+        <!-- Eureka client: lets the gateway register itself and resolve lb:// targets. -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
