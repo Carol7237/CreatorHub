@@ -32,9 +32,10 @@
     <!-- Microservice modules. The legacy monolith (/src + root pom.xml) is left
          UNTOUCHED and is intentionally NOT a module here (see NEXT_STEPS.md). -->
     <modules>
+        <module>common</module>
         <module>eureka-server</module>
         <module>api-gateway</module>
-        <module>probe-service</module>
+        <module>user-service</module>
     </modules>
 
     <dependencyManagement>

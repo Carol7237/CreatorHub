@@ -16,6 +16,9 @@ buildNumber.properties
 logs/
 *.log
 
+### Local run/validation scratch (service jars launched in background, cookie jars, body files) ###
+.run-logs/
+
 ### Compiled output ###
 *.class
 

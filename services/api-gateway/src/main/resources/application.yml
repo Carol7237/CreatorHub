@@ -8,10 +8,11 @@ spring:
           # Explicit routes. lb:// = resolve the target through Eureka and
           # load-balance across its instances (Spring Cloud LoadBalancer).
           routes:
-            - id: probe-service
-              uri: lb://probe-service
+            # User / identity bounded context: auth, creators browsing, profiles, admin users.
+            - id: user-service
+              uri: lb://user-service
               predicates:
-                - Path=/api/probe/**
+                - Path=/api/auth/**,/api/creators/**,/api/profiles/**,/api/admin/**
 
 server:
   port: 8085   # 8080 is taken by Oracle TNS listener (TNSLSNR) on this machine.
