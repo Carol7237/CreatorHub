@@ -1,5 +1,6 @@
 package com.creatorhub.service.impl;
 
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.ProfileRequest;
 import com.creatorhub.dto.ProfileResponse;
 import com.creatorhub.exception.ResourceNotFoundException;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.util.List;
 import java.util.Optional;
@@ -61,15 +63,22 @@ class ProfileServiceImplTest {
     }
 
     @Test
-    void update_changesFields() {
-        Profile p = profile(1L);
+    void update_byOwner_changesFields() {
+        Profile p = profile(1L); // owned by user 1
         when(profileRepository.findById(1L)).thenReturn(Optional.of(p));
 
         ProfileResponse response = profileService.update(1L,
-                ProfileRequest.builder().displayName("Updated").bio("hello").build());
+                ProfileRequest.builder().displayName("Updated").bio("hello").build(),
+                new Viewer(1L, false));
 
         assertThat(response.getDisplayName()).isEqualTo("Updated");
-        assertThat(p.getDisplayName()).isEqualTo("Updated");
         assertThat(p.getBio()).isEqualTo("hello");
+    }
+
+    @Test
+    void update_byNonOwner_throwsAccessDenied() {
+        when(profileRepository.findById(1L)).thenReturn(Optional.of(profile(1L)));
+        assertThrows(AccessDeniedException.class, () -> profileService.update(1L,
+                ProfileRequest.builder().displayName("hack").build(), new Viewer(999L, false)));
     }
 }

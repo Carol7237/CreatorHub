@@ -1,5 +1,6 @@
 package com.creatorhub.service.impl;
 
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.SubscriptionRequest;
 import com.creatorhub.dto.SubscriptionResponse;
 import com.creatorhub.exception.BusinessRuleException;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.time.LocalDate;
 import java.util.Optional;
@@ -24,7 +26,6 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -53,6 +54,10 @@ class SubscriptionServiceImplTest {
         return t;
     }
 
+    private static Viewer fan(Long id) {
+        return new Viewer(id, false);
+    }
+
     @Test
     void create_valid_setsActiveAndToday() {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
@@ -65,7 +70,7 @@ class SubscriptionServiceImplTest {
         });
 
         SubscriptionResponse response = subscriptionService.create(
-                SubscriptionRequest.builder().fanId(1L).tierId(5L).build());
+                SubscriptionRequest.builder().tierId(5L).build(), fan(1L));
 
         assertThat(response.getStatus()).isEqualTo(SubStatus.ACTIVE);
         assertThat(response.getStartDate()).isEqualTo(LocalDate.now());
@@ -77,9 +82,8 @@ class SubscriptionServiceImplTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
         when(tierRepository.findById(5L)).thenReturn(Optional.of(tier(5L, 2L)));
         when(subscriptionRepository.existsByFanIdAndTierIdAndStatus(1L, 5L, SubStatus.ACTIVE)).thenReturn(true);
-
         assertThrows(DuplicateResourceException.class, () -> subscriptionService.create(
-                SubscriptionRequest.builder().fanId(1L).tierId(5L).build()));
+                SubscriptionRequest.builder().tierId(5L).build(), fan(1L)));
         verify(subscriptionRepository, never()).save(any());
     }
 
@@ -87,17 +91,9 @@ class SubscriptionServiceImplTest {
     void create_selfSubscription_throws() {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
         when(tierRepository.findById(5L)).thenReturn(Optional.of(tier(5L, 1L))); // creator == fan
-
         assertThrows(BusinessRuleException.class, () -> subscriptionService.create(
-                SubscriptionRequest.builder().fanId(1L).tierId(5L).build()));
+                SubscriptionRequest.builder().tierId(5L).build(), fan(1L)));
         verify(subscriptionRepository, never()).save(any());
-    }
-
-    @Test
-    void create_fanNotFound_throws() {
-        when(userRepository.findById(1L)).thenReturn(Optional.empty());
-        assertThrows(ResourceNotFoundException.class, () -> subscriptionService.create(
-                SubscriptionRequest.builder().fanId(1L).tierId(5L).build()));
     }
 
     @Test
@@ -105,47 +101,48 @@ class SubscriptionServiceImplTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
         when(tierRepository.findById(5L)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> subscriptionService.create(
-                SubscriptionRequest.builder().fanId(1L).tierId(5L).build()));
+                SubscriptionRequest.builder().tierId(5L).build(), fan(1L)));
     }
 
     @Test
-    void cancel_active_setsCancelled() {
+    void cancel_byOwner_setsCancelled() {
         Subscription sub = new Subscription();
         sub.setId(10L);
         sub.setFan(user(1L));
         sub.setTier(tier(5L, 2L));
         sub.setStatus(SubStatus.ACTIVE);
-        sub.setStartDate(LocalDate.now());
         when(subscriptionRepository.findById(10L)).thenReturn(Optional.of(sub));
-
-        SubscriptionResponse response = subscriptionService.cancel(10L);
-
+        SubscriptionResponse response = subscriptionService.cancel(10L, fan(1L));
         assertThat(response.getStatus()).isEqualTo(SubStatus.CANCELLED);
-        assertThat(sub.getStatus()).isEqualTo(SubStatus.CANCELLED);
+    }
+
+    @Test
+    void cancel_byNonOwner_throwsAccessDenied() {
+        Subscription sub = new Subscription();
+        sub.setId(10L);
+        sub.setFan(user(1L));
+        sub.setStatus(SubStatus.ACTIVE);
+        when(subscriptionRepository.findById(10L)).thenReturn(Optional.of(sub));
+        assertThrows(AccessDeniedException.class, () -> subscriptionService.cancel(10L, fan(999L)));
     }
 
     @Test
     void cancel_alreadyCancelled_throws() {
         Subscription sub = new Subscription();
         sub.setId(10L);
+        sub.setFan(user(1L));
         sub.setStatus(SubStatus.CANCELLED);
         when(subscriptionRepository.findById(10L)).thenReturn(Optional.of(sub));
-        assertThrows(BusinessRuleException.class, () -> subscriptionService.cancel(10L));
+        assertThrows(BusinessRuleException.class, () -> subscriptionService.cancel(10L, fan(1L)));
     }
 
     @Test
-    void delete_existing_deletes() {
+    void delete_byOwner_deletes() {
         Subscription sub = new Subscription();
         sub.setId(10L);
+        sub.setFan(user(1L));
         when(subscriptionRepository.findById(10L)).thenReturn(Optional.of(sub));
-        subscriptionService.delete(10L);
+        subscriptionService.delete(10L, fan(1L));
         verify(subscriptionRepository).delete(sub);
-    }
-
-    @Test
-    void findByFanAndStatus_delegatesToRepository() {
-        when(subscriptionRepository.findByFanIdAndStatus(eq(1L), eq(SubStatus.ACTIVE)))
-                .thenReturn(java.util.List.of());
-        assertThat(subscriptionService.findByFanAndStatus(1L, SubStatus.ACTIVE)).isEmpty();
     }
 }

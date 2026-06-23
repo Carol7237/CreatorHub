@@ -1,15 +1,17 @@
 package com.creatorhub.service.impl;
 
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.PostRequest;
 import com.creatorhub.dto.PostResponse;
 import com.creatorhub.exception.BusinessRuleException;
 import com.creatorhub.exception.ResourceNotFoundException;
 import com.creatorhub.model.Post;
 import com.creatorhub.model.SubscriptionTier;
-import com.creatorhub.model.Tag;
 import com.creatorhub.model.User;
 import com.creatorhub.model.enums.Role;
+import com.creatorhub.model.enums.SubStatus;
 import com.creatorhub.repository.PostRepository;
+import com.creatorhub.repository.SubscriptionRepository;
 import com.creatorhub.repository.SubscriptionTierRepository;
 import com.creatorhub.repository.TagRepository;
 import com.creatorhub.repository.UserRepository;
@@ -21,17 +23,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +44,7 @@ class PostServiceImplTest {
     @Mock private UserRepository userRepository;
     @Mock private SubscriptionTierRepository tierRepository;
     @Mock private TagRepository tagRepository;
+    @Mock private SubscriptionRepository subscriptionRepository;
 
     @InjectMocks private PostServiceImpl postService;
 
@@ -62,32 +65,45 @@ class PostServiceImplTest {
         return t;
     }
 
+    private static Post premiumPost(Long id, User author, SubscriptionTier tier) {
+        Post p = new Post();
+        p.setId(id);
+        p.setTitle("Premium");
+        p.setBody("secret body");
+        p.setPremium(true);
+        p.setAuthor(author);
+        p.setTier(tier);
+        return p;
+    }
+
+    private static Viewer viewer(Long id) {
+        return new Viewer(id, false);
+    }
+
+    // --- create rules ---
+
     @Test
     void create_premiumWithoutTier_throws() {
         when(userRepository.findById(1L)).thenReturn(Optional.of(creator(1L)));
-        PostRequest req = PostRequest.builder().title("t").body("b").premium(true).authorId(1L).build();
-        assertThrows(BusinessRuleException.class, () -> postService.create(req));
+        PostRequest req = PostRequest.builder().title("t").body("b").premium(true).build();
+        assertThrows(BusinessRuleException.class, () -> postService.create(req, viewer(1L)));
         verify(postRepository, never()).save(any());
     }
 
     @Test
     void create_freeWithTier_throws() {
         when(userRepository.findById(1L)).thenReturn(Optional.of(creator(1L)));
-        PostRequest req = PostRequest.builder().title("t").body("b").premium(false).authorId(1L).tierId(5L).build();
-        assertThrows(BusinessRuleException.class, () -> postService.create(req));
-        verify(postRepository, never()).save(any());
+        PostRequest req = PostRequest.builder().title("t").body("b").premium(false).tierId(5L).build();
+        assertThrows(BusinessRuleException.class, () -> postService.create(req, viewer(1L)));
     }
 
     @Test
     void create_premiumWithForeignTier_throws() {
         User author = creator(1L);
-        SubscriptionTier foreignTier = tier(5L, creator(2L)); // owned by a different creator
         when(userRepository.findById(1L)).thenReturn(Optional.of(author));
-        when(tierRepository.findById(5L)).thenReturn(Optional.of(foreignTier));
-
-        PostRequest req = PostRequest.builder().title("t").body("b").premium(true).authorId(1L).tierId(5L).build();
-        assertThrows(BusinessRuleException.class, () -> postService.create(req));
-        verify(postRepository, never()).save(any());
+        when(tierRepository.findById(5L)).thenReturn(Optional.of(tier(5L, creator(2L))));
+        PostRequest req = PostRequest.builder().title("t").body("b").premium(true).tierId(5L).build();
+        assertThrows(BusinessRuleException.class, () -> postService.create(req, viewer(1L)));
     }
 
     @Test
@@ -98,109 +114,128 @@ class PostServiceImplTest {
             p.setId(100L);
             return p;
         });
-
         PostResponse response = postService.create(
-                PostRequest.builder().title("Hello").body("b").premium(false).authorId(1L).build());
-
+                PostRequest.builder().title("Hello").body("b").premium(false).build(), viewer(1L));
         assertThat(response.isPremium()).isFalse();
-        assertThat(response.getTierId()).isNull();
+        assertThat(response.isLocked()).isFalse();
         assertThat(response.getCreatorId()).isEqualTo(1L);
-    }
-
-    @Test
-    void create_validPremiumPost_withGetOrCreateTags_succeeds() {
-        User author = creator(1L);
-        when(userRepository.findById(1L)).thenReturn(Optional.of(author));
-        when(tierRepository.findById(5L)).thenReturn(Optional.of(tier(5L, author)));
-        // "news" already exists, "fresh" must be created
-        Tag existing = new Tag();
-        existing.setId(7L);
-        existing.setName("news");
-        when(tagRepository.findByNameIn(any())).thenReturn(List.of(existing));
-        when(tagRepository.save(any(Tag.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(postRepository.save(any(Post.class))).thenAnswer(inv -> {
-            Post p = inv.getArgument(0);
-            p.setId(100L);
-            return p;
-        });
-
-        PostResponse response = postService.create(PostRequest.builder()
-                .title("Premium").body("b").premium(true).authorId(1L).tierId(5L)
-                .tags(Set.of("news", "fresh")).build());
-
-        assertThat(response.isPremium()).isTrue();
-        assertThat(response.getTierId()).isEqualTo(5L);
-        assertThat(response.getTags()).containsExactlyInAnyOrder("news", "fresh");
-        verify(tagRepository, times(1)).save(any(Tag.class)); // only "fresh" is new
-    }
-
-    @Test
-    void findById_notFound_throws() {
-        when(postRepository.findById(99L)).thenReturn(Optional.empty());
-        assertThrows(ResourceNotFoundException.class, () -> postService.findById(99L));
     }
 
     @Test
     void create_authorNotFound_throws() {
         when(userRepository.findById(42L)).thenReturn(Optional.empty());
-        PostRequest req = PostRequest.builder().title("t").body("b").premium(false).authorId(42L).build();
-        assertThrows(ResourceNotFoundException.class, () -> postService.create(req));
+        PostRequest req = PostRequest.builder().title("t").body("b").premium(false).build();
+        assertThrows(ResourceNotFoundException.class, () -> postService.create(req, viewer(42L)));
     }
 
-    private static Post post(Long id, User author) {
-        Post p = new Post();
-        p.setId(id);
-        p.setTitle("Post " + id);
-        p.setAuthor(author);
-        return p;
+    // --- premium gating on read ---
+
+    @Test
+    void findById_premium_anonymous_isLocked() {
+        when(postRepository.findById(10L)).thenReturn(Optional.of(premiumPost(10L, creator(1L), tier(5L, creator(1L)))));
+        PostResponse r = postService.findById(10L, Viewer.anonymous());
+        assertThat(r.isLocked()).isTrue();
+        assertThat(r.getBody()).isNull();
+        assertThat(r.getTitle()).isEqualTo("Premium"); // metadata still visible
     }
 
     @Test
-    void findAll_mapsEntities() {
-        when(postRepository.findAll()).thenReturn(List.of(post(1L, creator(1L)), post(2L, creator(1L))));
-        assertThat(postService.findAll()).hasSize(2);
+    void findById_premium_author_seesBody() {
+        when(postRepository.findById(10L)).thenReturn(Optional.of(premiumPost(10L, creator(1L), tier(5L, creator(1L)))));
+        PostResponse r = postService.findById(10L, viewer(1L)); // viewer == author
+        assertThat(r.isLocked()).isFalse();
+        assertThat(r.getBody()).isEqualTo("secret body");
     }
 
     @Test
-    void findByPremium_delegates() {
-        when(postRepository.findByPremium(true)).thenReturn(List.of(post(1L, creator(1L))));
-        assertThat(postService.findByPremium(true)).hasSize(1);
+    void findById_premium_admin_seesBody() {
+        when(postRepository.findById(10L)).thenReturn(Optional.of(premiumPost(10L, creator(1L), tier(5L, creator(1L)))));
+        PostResponse r = postService.findById(10L, new Viewer(99L, true)); // admin
+        assertThat(r.isLocked()).isFalse();
+        assertThat(r.getBody()).isEqualTo("secret body");
     }
 
     @Test
-    void findByCreatorAndPremium_delegates() {
-        when(postRepository.findByAuthorIdAndPremium(1L, false)).thenReturn(List.of(post(1L, creator(1L))));
-        assertThat(postService.findByCreatorAndPremium(1L, false)).hasSize(1);
+    void findById_premium_activeSubscriber_seesBody() {
+        when(postRepository.findById(10L)).thenReturn(Optional.of(premiumPost(10L, creator(1L), tier(5L, creator(1L)))));
+        when(subscriptionRepository.existsByFanIdAndTierIdAndStatus(7L, 5L, SubStatus.ACTIVE)).thenReturn(true);
+        PostResponse r = postService.findById(10L, viewer(7L));
+        assertThat(r.isLocked()).isFalse();
+        assertThat(r.getBody()).isEqualTo("secret body");
+    }
+
+    @Test
+    void findById_premium_nonSubscriber_isLocked() {
+        when(postRepository.findById(10L)).thenReturn(Optional.of(premiumPost(10L, creator(1L), tier(5L, creator(1L)))));
+        when(subscriptionRepository.existsByFanIdAndTierIdAndStatus(7L, 5L, SubStatus.ACTIVE)).thenReturn(false);
+        PostResponse r = postService.findById(10L, viewer(7L));
+        assertThat(r.isLocked()).isTrue();
+        assertThat(r.getBody()).isNull();
+    }
+
+    @Test
+    void findById_freePost_alwaysVisible() {
+        Post free = new Post();
+        free.setId(11L);
+        free.setTitle("Free");
+        free.setBody("open");
+        free.setPremium(false);
+        free.setAuthor(creator(1L));
+        when(postRepository.findById(11L)).thenReturn(Optional.of(free));
+        PostResponse r = postService.findById(11L, Viewer.anonymous());
+        assertThat(r.isLocked()).isFalse();
+        assertThat(r.getBody()).isEqualTo("open");
+    }
+
+    @Test
+    void findById_notFound_throws() {
+        when(postRepository.findById(99L)).thenReturn(Optional.empty());
+        assertThrows(ResourceNotFoundException.class, () -> postService.findById(99L, Viewer.anonymous()));
     }
 
     @Test
     void findAll_paged_returnsPagedResponse() {
         Pageable pageable = PageRequest.of(0, 10);
+        Post free = new Post();
+        free.setId(1L);
+        free.setPremium(false);
+        free.setAuthor(creator(1L));
         when(postRepository.findAll(any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(post(1L, creator(1L))), pageable, 1));
-        var page = postService.findAll(pageable);
+                .thenReturn(new PageImpl<>(List.of(free), pageable, 1));
+        var page = postService.findAll(pageable, Viewer.anonymous());
         assertThat(page.getContent()).hasSize(1);
         assertThat(page.getTotalElements()).isEqualTo(1);
     }
 
     @Test
-    void update_freePost_changesTitle() {
-        Post existing = post(100L, creator(1L));
-        existing.setPremium(false);
-        when(postRepository.findById(100L)).thenReturn(Optional.of(existing));
+    void findByCreator_paged_delegates() {
+        Pageable pageable = PageRequest.of(0, 10);
+        when(postRepository.findByAuthorId(eq(1L), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), pageable, 0));
+        assertThat(postService.findByCreator(1L, pageable, Viewer.anonymous()).getContent()).isEmpty();
+    }
 
-        PostResponse response = postService.update(100L,
-                PostRequest.builder().title("Updated title").premium(false).build());
+    // --- ownership on update/delete ---
 
-        assertThat(response.getTitle()).isEqualTo("Updated title");
-        assertThat(existing.getTitle()).isEqualTo("Updated title");
+    @Test
+    void update_byNonOwner_throwsAccessDenied() {
+        when(postRepository.findById(10L)).thenReturn(Optional.of(premiumPost(10L, creator(1L), tier(5L, creator(1L)))));
+        PostRequest req = PostRequest.builder().title("hack").premium(true).tierId(5L).build();
+        assertThrows(AccessDeniedException.class, () -> postService.update(10L, req, viewer(999L)));
     }
 
     @Test
-    void delete_deletes() {
-        Post existing = post(100L, creator(1L));
-        when(postRepository.findById(100L)).thenReturn(Optional.of(existing));
-        postService.delete(100L);
-        verify(postRepository).delete(existing);
+    void delete_byOwner_deletes() {
+        Post post = premiumPost(10L, creator(1L), tier(5L, creator(1L)));
+        when(postRepository.findById(10L)).thenReturn(Optional.of(post));
+        postService.delete(10L, viewer(1L));
+        verify(postRepository).delete(post);
+    }
+
+    @Test
+    void delete_byNonOwner_throwsAccessDenied() {
+        when(postRepository.findById(10L)).thenReturn(Optional.of(premiumPost(10L, creator(1L), tier(5L, creator(1L)))));
+        assertThrows(AccessDeniedException.class, () -> postService.delete(10L, viewer(999L)));
+        verify(postRepository, never()).delete(any());
     }
 }

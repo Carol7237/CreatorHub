@@ -1,5 +1,6 @@
 package com.creatorhub.service;
 
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.PagedResponse;
 import com.creatorhub.dto.PostRequest;
 import com.creatorhub.dto.PostResponse;
@@ -7,7 +8,6 @@ import com.creatorhub.dto.SubscriptionRequest;
 import com.creatorhub.dto.SubscriptionResponse;
 import com.creatorhub.dto.SubscriptionTierRequest;
 import com.creatorhub.dto.UserRequest;
-import com.creatorhub.dto.UserResponse;
 import com.creatorhub.exception.BusinessRuleException;
 import com.creatorhub.model.enums.Role;
 import org.junit.jupiter.api.DisplayName;
@@ -42,6 +42,10 @@ class PaginationSortingIntegrationTest {
     @Autowired
     private SubscriptionService subscriptionService;
 
+    private static Viewer viewer(Long id) {
+        return new Viewer(id, false);
+    }
+
     private Long createUser(String username) {
         return userService.create(UserRequest.builder()
                 .username(username).email(username + "@example.com")
@@ -54,8 +58,7 @@ class PaginationSortingIntegrationTest {
                     .title(String.format("Post %02d", i))
                     .body("body " + i)
                     .premium(false)
-                    .authorId(creatorId)
-                    .build());
+                    .build(), viewer(creatorId));
         }
     }
 
@@ -64,14 +67,14 @@ class PaginationSortingIntegrationTest {
     void postPagination_returnsCorrectPages() {
         createPosts(createUser("pager"), 25);
 
-        PagedResponse<PostResponse> page0 = postService.findAll(PageRequest.of(0, 20));
+        PagedResponse<PostResponse> page0 = postService.findAll(PageRequest.of(0, 20), Viewer.anonymous());
         assertThat(page0.getContent()).hasSize(20);
         assertThat(page0.getTotalElements()).isEqualTo(25);
         assertThat(page0.getTotalPages()).isEqualTo(2);
         assertThat(page0.isFirst()).isTrue();
         assertThat(page0.isLast()).isFalse();
 
-        PagedResponse<PostResponse> page1 = postService.findAll(PageRequest.of(1, 20));
+        PagedResponse<PostResponse> page1 = postService.findAll(PageRequest.of(1, 20), Viewer.anonymous());
         assertThat(page1.getContent()).hasSize(5);
         assertThat(page1.isFirst()).isFalse();
         assertThat(page1.isLast()).isTrue();
@@ -83,9 +86,9 @@ class PaginationSortingIntegrationTest {
         createPosts(createUser("sorter"), 25);
 
         PagedResponse<PostResponse> asc =
-                postService.findAll(PageRequest.of(0, 25, Sort.by("title").ascending()));
+                postService.findAll(PageRequest.of(0, 25, Sort.by("title").ascending()), Viewer.anonymous());
         PagedResponse<PostResponse> desc =
-                postService.findAll(PageRequest.of(0, 25, Sort.by("title").descending()));
+                postService.findAll(PageRequest.of(0, 25, Sort.by("title").descending()), Viewer.anonymous());
 
         assertThat(asc.getContent().get(0).getTitle()).isEqualTo("Post 01");
         assertThat(desc.getContent().get(0).getTitle()).isEqualTo("Post 25");
@@ -96,7 +99,7 @@ class PaginationSortingIntegrationTest {
     void maxPageSize_isCapped() {
         createPosts(createUser("capper"), 25);
 
-        PagedResponse<PostResponse> capped = postService.findAll(PageRequest.of(0, 500));
+        PagedResponse<PostResponse> capped = postService.findAll(PageRequest.of(0, 500), Viewer.anonymous());
         assertThat(capped.getSize()).isEqualTo(100); // requested 500, capped to MAX_PAGE_SIZE
         assertThat(capped.getContent()).hasSize(25);
     }
@@ -106,7 +109,7 @@ class PaginationSortingIntegrationTest {
     void invalidSortProperty_throws() {
         createUser("badsort");
         assertThrows(BusinessRuleException.class, () ->
-                postService.findAll(PageRequest.of(0, 10, Sort.by("nonexistent"))));
+                postService.findAll(PageRequest.of(0, 10, Sort.by("nonexistent")), Viewer.anonymous()));
     }
 
     @Test
@@ -122,11 +125,11 @@ class PaginationSortingIntegrationTest {
     void subscriptionPagination() {
         Long creatorId = createUser("sub_creator");
         Long tierId = tierService.create(SubscriptionTierRequest.builder()
-                .name("VIP").priceMonthly(new BigDecimal("9.99")).creatorId(creatorId).build()).getId();
+                .name("VIP").priceMonthly(new BigDecimal("9.99")).build(), viewer(creatorId)).getId();
 
         for (int i = 0; i < 3; i++) {
             Long fanId = createUser("fan_" + i);
-            subscriptionService.create(SubscriptionRequest.builder().fanId(fanId).tierId(tierId).build());
+            subscriptionService.create(SubscriptionRequest.builder().tierId(tierId).build(), viewer(fanId));
         }
 
         PagedResponse<SubscriptionResponse> page0 =

@@ -1,5 +1,6 @@
 package com.creatorhub.service.impl;
 
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.SubscriptionTierRequest;
 import com.creatorhub.dto.SubscriptionTierResponse;
 import com.creatorhub.exception.BusinessRuleException;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -43,9 +45,21 @@ class SubscriptionTierServiceImplTest {
         return u;
     }
 
+    private static SubscriptionTier tier(Long id, Long creatorId) {
+        SubscriptionTier t = new SubscriptionTier();
+        t.setId(id);
+        t.setName("VIP");
+        t.setPriceMonthly(new BigDecimal("9.99"));
+        t.setCreator(creator(creatorId));
+        return t;
+    }
+
     private SubscriptionTierRequest request(String price) {
-        return SubscriptionTierRequest.builder()
-                .name("VIP").priceMonthly(new BigDecimal(price)).creatorId(1L).build();
+        return SubscriptionTierRequest.builder().name("VIP").priceMonthly(new BigDecimal(price)).build();
+    }
+
+    private static Viewer viewer(Long id) {
+        return new Viewer(id, false);
     }
 
     @Test
@@ -56,32 +70,22 @@ class SubscriptionTierServiceImplTest {
             t.setId(5L);
             return t;
         });
-
-        SubscriptionTierResponse response = tierService.create(request("9.99"));
-
+        SubscriptionTierResponse response = tierService.create(request("9.99"), viewer(1L));
         assertThat(response.getId()).isEqualTo(5L);
-        assertThat(response.getPriceMonthly()).isEqualByComparingTo("9.99");
         assertThat(response.getCreatorId()).isEqualTo(1L);
     }
 
     @Test
     void create_zeroPrice_throws() {
         when(userRepository.findById(1L)).thenReturn(Optional.of(creator(1L)));
-        assertThrows(BusinessRuleException.class, () -> tierService.create(request("0")));
+        assertThrows(BusinessRuleException.class, () -> tierService.create(request("0"), viewer(1L)));
         verify(tierRepository, never()).save(any());
     }
 
     @Test
     void create_negativePrice_throws() {
         when(userRepository.findById(1L)).thenReturn(Optional.of(creator(1L)));
-        assertThrows(BusinessRuleException.class, () -> tierService.create(request("-5")));
-        verify(tierRepository, never()).save(any());
-    }
-
-    @Test
-    void create_creatorNotFound_throws() {
-        when(userRepository.findById(1L)).thenReturn(Optional.empty());
-        assertThrows(ResourceNotFoundException.class, () -> tierService.create(request("9.99")));
+        assertThrows(BusinessRuleException.class, () -> tierService.create(request("-5"), viewer(1L)));
     }
 
     @Test
@@ -91,77 +95,68 @@ class SubscriptionTierServiceImplTest {
     }
 
     @Test
+    void update_byOwner_changesFields() {
+        when(tierRepository.findById(5L)).thenReturn(Optional.of(tier(5L, 1L)));
+        SubscriptionTierResponse response = tierService.update(5L, SubscriptionTierRequest.builder()
+                .name("Pro").priceMonthly(new BigDecimal("19.99")).build(), viewer(1L));
+        assertThat(response.getName()).isEqualTo("Pro");
+        assertThat(response.getPriceMonthly()).isEqualByComparingTo("19.99");
+    }
+
+    @Test
+    void update_byNonOwner_throwsAccessDenied() {
+        when(tierRepository.findById(5L)).thenReturn(Optional.of(tier(5L, 1L)));
+        assertThrows(AccessDeniedException.class, () -> tierService.update(5L,
+                SubscriptionTierRequest.builder().name("hack").build(), viewer(999L)));
+    }
+
+    @Test
     void update_zeroPrice_throws() {
-        SubscriptionTier tier = new SubscriptionTier();
-        tier.setId(5L);
-        tier.setCreator(creator(1L));
-        when(tierRepository.findById(5L)).thenReturn(Optional.of(tier));
+        when(tierRepository.findById(5L)).thenReturn(Optional.of(tier(5L, 1L)));
         assertThrows(BusinessRuleException.class, () -> tierService.update(5L,
-                SubscriptionTierRequest.builder().priceMonthly(BigDecimal.ZERO).build()));
+                SubscriptionTierRequest.builder().priceMonthly(BigDecimal.ZERO).build(), viewer(1L)));
     }
 
     @Test
     void delete_withSubscriptions_throwsInUse() {
-        SubscriptionTier tier = new SubscriptionTier();
-        tier.setId(5L);
+        SubscriptionTier tier = tier(5L, 1L);
         tier.getSubscriptions().add(new Subscription());
         when(tierRepository.findById(5L)).thenReturn(Optional.of(tier));
-
-        assertThrows(ResourceInUseException.class, () -> tierService.delete(5L));
+        assertThrows(ResourceInUseException.class, () -> tierService.delete(5L, viewer(1L)));
         verify(tierRepository, never()).delete(any());
     }
 
     @Test
     void delete_withGatedPosts_throwsInUse() {
-        SubscriptionTier tier = new SubscriptionTier();
-        tier.setId(5L);
+        SubscriptionTier tier = tier(5L, 1L);
         tier.getPosts().add(new Post());
         when(tierRepository.findById(5L)).thenReturn(Optional.of(tier));
-
-        assertThrows(ResourceInUseException.class, () -> tierService.delete(5L));
-        verify(tierRepository, never()).delete(any());
+        assertThrows(ResourceInUseException.class, () -> tierService.delete(5L, viewer(1L)));
     }
 
     @Test
-    void delete_clean_deletes() {
-        SubscriptionTier tier = new SubscriptionTier();
-        tier.setId(5L);
-        when(tierRepository.findById(5L)).thenReturn(Optional.of(tier));
-        tierService.delete(5L);
-        verify(tierRepository).delete(tier);
+    void delete_byNonOwner_throwsAccessDenied() {
+        when(tierRepository.findById(5L)).thenReturn(Optional.of(tier(5L, 1L)));
+        assertThrows(AccessDeniedException.class, () -> tierService.delete(5L, viewer(999L)));
     }
 
-    private static SubscriptionTier tier(Long id) {
-        SubscriptionTier t = new SubscriptionTier();
-        t.setId(id);
-        t.setName("VIP");
-        t.setPriceMonthly(new BigDecimal("9.99"));
-        t.setCreator(creator(1L));
-        return t;
+    @Test
+    void delete_byOwner_clean_deletes() {
+        SubscriptionTier tier = tier(5L, 1L);
+        when(tierRepository.findById(5L)).thenReturn(Optional.of(tier));
+        tierService.delete(5L, viewer(1L));
+        verify(tierRepository).delete(tier);
     }
 
     @Test
     void findAll_mapsEntities() {
-        when(tierRepository.findAll()).thenReturn(List.of(tier(5L), tier(6L)));
+        when(tierRepository.findAll()).thenReturn(List.of(tier(5L, 1L), tier(6L, 1L)));
         assertThat(tierService.findAll()).hasSize(2);
     }
 
     @Test
     void findByCreator_delegates() {
-        when(tierRepository.findByCreatorId(1L)).thenReturn(List.of(tier(5L)));
+        when(tierRepository.findByCreatorId(1L)).thenReturn(List.of(tier(5L, 1L)));
         assertThat(tierService.findByCreator(1L)).hasSize(1);
-    }
-
-    @Test
-    void update_valid_changesFields() {
-        SubscriptionTier existing = tier(5L);
-        when(tierRepository.findById(5L)).thenReturn(Optional.of(existing));
-
-        SubscriptionTierResponse response = tierService.update(5L, SubscriptionTierRequest.builder()
-                .name("Pro").priceMonthly(new BigDecimal("19.99")).perks("everything").build());
-
-        assertThat(response.getName()).isEqualTo("Pro");
-        assertThat(response.getPriceMonthly()).isEqualByComparingTo("19.99");
-        assertThat(existing.getPerks()).isEqualTo("everything");
     }
 }

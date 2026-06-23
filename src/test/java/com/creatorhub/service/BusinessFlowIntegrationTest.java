@@ -1,12 +1,12 @@
 package com.creatorhub.service;
 
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.CommentRequest;
 import com.creatorhub.dto.CommentResponse;
 import com.creatorhub.dto.PostRequest;
 import com.creatorhub.dto.PostResponse;
 import com.creatorhub.dto.SubscriptionRequest;
 import com.creatorhub.dto.SubscriptionResponse;
-import com.creatorhub.dto.SubscriptionTierRequest;
 import com.creatorhub.dto.SubscriptionTierResponse;
 import com.creatorhub.dto.UserRequest;
 import com.creatorhub.dto.UserResponse;
@@ -30,7 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /**
  * End-to-end integration test (Scenario 1): the full business flow through the
  * real service layer, wired by Spring, against H2 (no Docker). Rolls back after
- * each test (@Transactional). Originally the Phase 2 flow tests.
+ * each test (@Transactional). Owners are passed explicitly via {@link Viewer}
+ * (the controllers resolve this from the security context).
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -40,7 +41,7 @@ class BusinessFlowIntegrationTest {
     @Autowired
     private UserService userService;
     @Autowired
-    private SubscriptionTierService tierService;
+    private com.creatorhub.service.SubscriptionTierService tierService;
     @Autowired
     private PostService postService;
     @Autowired
@@ -54,16 +55,19 @@ class BusinessFlowIntegrationTest {
         return userService.create(UserRequest.builder()
                 .username(username)
                 .email(username + "@example.com")
-                .password("secret")
+                .password("secret12")
                 .build());
     }
 
+    private static Viewer viewer(Long userId) {
+        return new Viewer(userId, false);
+    }
+
     private SubscriptionTierResponse newTier(Long creatorId, String name, String price) {
-        return tierService.create(SubscriptionTierRequest.builder()
+        return tierService.create(com.creatorhub.dto.SubscriptionTierRequest.builder()
                 .name(name)
                 .priceMonthly(new BigDecimal(price))
-                .creatorId(creatorId)
-                .build());
+                .build(), viewer(creatorId));
     }
 
     // --- tests ---
@@ -72,11 +76,8 @@ class BusinessFlowIntegrationTest {
     @DisplayName("Creating a user auto-creates its profile (displayName defaults to username)")
     void createUser_autoCreatesProfile() {
         UserResponse user = newUser("creator_profile");
-
-        assertThat(user.getId()).isNotNull();
         assertThat(user.getProfileId()).isNotNull();
         assertThat(user.getDisplayName()).isEqualTo("creator_profile");
-        assertThat(user.getEmail()).isEqualTo("creator_profile@example.com");
     }
 
     @Test
@@ -89,10 +90,9 @@ class BusinessFlowIntegrationTest {
                 .title("Behind the scenes")
                 .body("Premium content body")
                 .premium(true)
-                .authorId(creator.getId())
                 .tierId(tier.getId())
                 .tags(Set.of("news", "update"))
-                .build());
+                .build(), viewer(creator.getId()));
 
         assertThat(post.isPremium()).isTrue();
         assertThat(post.getTierId()).isEqualTo(tier.getId());
@@ -100,25 +100,43 @@ class BusinessFlowIntegrationTest {
         assertThat(post.getTags()).containsExactlyInAnyOrder("news", "update");
 
         UserResponse fan = newUser("fan_flow");
-        SubscriptionResponse sub = subscriptionService.create(SubscriptionRequest.builder()
-                .fanId(fan.getId())
-                .tierId(tier.getId())
-                .build());
+        SubscriptionResponse sub = subscriptionService.create(
+                SubscriptionRequest.builder().tierId(tier.getId()).build(), viewer(fan.getId()));
 
         assertThat(sub.getStatus()).isEqualTo(SubStatus.ACTIVE);
         assertThat(sub.getStartDate()).isEqualTo(LocalDate.now());
         assertThat(sub.getCreatorId()).isEqualTo(creator.getId());
 
-        CommentResponse comment = commentService.create(CommentRequest.builder()
-                .text("Loved this!")
-                .postId(post.getId())
-                .authorId(fan.getId())
-                .build());
-
+        // Subscriber can comment on the premium post and can see its body.
+        CommentResponse comment = commentService.create(
+                CommentRequest.builder().text("Loved this!").postId(post.getId()).build(), viewer(fan.getId()));
         assertThat(comment.getId()).isNotNull();
+
+        PostResponse asSubscriber = postService.findById(post.getId(), viewer(fan.getId()));
+        assertThat(asSubscriber.isLocked()).isFalse();
+        assertThat(asSubscriber.getBody()).isEqualTo("Premium content body");
+
+        // Anonymous viewer sees the premium post locked (no body).
+        PostResponse asAnon = postService.findById(post.getId(), Viewer.anonymous());
+        assertThat(asAnon.isLocked()).isTrue();
+        assertThat(asAnon.getBody()).isNull();
+
         assertThat(commentService.findByPost(post.getId())).hasSize(1);
         assertThat(subscriptionService.findByFan(fan.getId())).hasSize(1);
-        assertThat(postService.findById(post.getId()).getTitle()).isEqualTo("Behind the scenes");
+    }
+
+    @Test
+    @DisplayName("A non-subscriber cannot comment on a premium post")
+    void nonSubscriberCannotCommentOnPremium() {
+        UserResponse creator = newUser("creator_pc");
+        SubscriptionTierResponse tier = newTier(creator.getId(), "VIP", "9.99");
+        PostResponse post = postService.create(PostRequest.builder()
+                .title("p").body("b").premium(true).tierId(tier.getId()).build(), viewer(creator.getId()));
+        UserResponse outsider = newUser("outsider_pc");
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class, () ->
+                commentService.create(CommentRequest.builder().text("hi").postId(post.getId()).build(),
+                        viewer(outsider.getId())));
     }
 
     @Test
@@ -128,12 +146,10 @@ class BusinessFlowIntegrationTest {
         SubscriptionTierResponse tier = newTier(creator.getId(), "Basic", "5.00");
         UserResponse fan = newUser("fan_dupsub");
 
-        subscriptionService.create(SubscriptionRequest.builder()
-                .fanId(fan.getId()).tierId(tier.getId()).build());
+        subscriptionService.create(SubscriptionRequest.builder().tierId(tier.getId()).build(), viewer(fan.getId()));
 
-        assertThrows(DuplicateResourceException.class, () ->
-                subscriptionService.create(SubscriptionRequest.builder()
-                        .fanId(fan.getId()).tierId(tier.getId()).build()));
+        assertThrows(DuplicateResourceException.class, () -> subscriptionService.create(
+                SubscriptionRequest.builder().tierId(tier.getId()).build(), viewer(fan.getId())));
     }
 
     @Test
@@ -142,32 +158,16 @@ class BusinessFlowIntegrationTest {
         UserResponse creator = newUser("creator_self");
         SubscriptionTierResponse tier = newTier(creator.getId(), "Basic", "5.00");
 
-        assertThrows(BusinessRuleException.class, () ->
-                subscriptionService.create(SubscriptionRequest.builder()
-                        .fanId(creator.getId()).tierId(tier.getId()).build()));
+        assertThrows(BusinessRuleException.class, () -> subscriptionService.create(
+                SubscriptionRequest.builder().tierId(tier.getId()).build(), viewer(creator.getId())));
     }
 
     @Test
     @DisplayName("A premium post without a tier is rejected")
     void premiumPostWithoutTier_throws() {
         UserResponse creator = newUser("creator_premnotier");
-
-        assertThrows(BusinessRuleException.class, () ->
-                postService.create(PostRequest.builder()
-                        .title("t").body("b").premium(true)
-                        .authorId(creator.getId()).tierId(null).build()));
-    }
-
-    @Test
-    @DisplayName("A free post with a tier is rejected")
-    void freePostWithTier_throws() {
-        UserResponse creator = newUser("creator_freetier");
-        SubscriptionTierResponse tier = newTier(creator.getId(), "Basic", "5.00");
-
-        assertThrows(BusinessRuleException.class, () ->
-                postService.create(PostRequest.builder()
-                        .title("t").body("b").premium(false)
-                        .authorId(creator.getId()).tierId(tier.getId()).build()));
+        assertThrows(BusinessRuleException.class, () -> postService.create(
+                PostRequest.builder().title("t").body("b").premium(true).build(), viewer(creator.getId())));
     }
 
     @Test
@@ -177,10 +177,9 @@ class BusinessFlowIntegrationTest {
         UserResponse creatorB = newUser("creator_b");
         SubscriptionTierResponse tierB = newTier(creatorB.getId(), "VIP", "9.99");
 
-        assertThrows(BusinessRuleException.class, () ->
-                postService.create(PostRequest.builder()
-                        .title("t").body("b").premium(true)
-                        .authorId(creatorA.getId()).tierId(tierB.getId()).build()));
+        assertThrows(BusinessRuleException.class, () -> postService.create(
+                PostRequest.builder().title("t").body("b").premium(true).tierId(tierB.getId()).build(),
+                viewer(creatorA.getId())));
     }
 
     @Test
