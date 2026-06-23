@@ -1,0 +1,19 @@
+.creator-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.2rem; }
+.creator-tile { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; text-align: center; text-decoration: none; }
+.creator-tile:hover { text-decoration: none; }
+.creator-tile-name { font-family: var(--font-display); font-weight: 600; color: var(--text); margin-top: 0.3rem; }
+
+.creator-hero { display: flex; gap: 1.4rem; align-items: center; }
+.creator-hero-info h1 { font-size: 1.8rem; }
+.creator-bio { color: var(--text-body); margin-top: 0.6rem; max-width: 560px; }
+
+.section-title { font-size: 1.35rem; margin: 1.8rem 0 1.1rem; }
+
+.tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.1rem; }
+.tier-card { display: flex; flex-direction: column; gap: 0.5rem; }
+.tier-name { font-family: var(--font-display); font-weight: 600; font-size: 1.1rem; color: var(--text); }
+.tier-price { font-family: var(--font-display); font-size: 1.7rem; font-weight: 700; }
+.tier-price .muted { font-size: 0.9rem; font-weight: 400; }
+.tier-perks { font-size: 0.88rem; flex: 1; }
+
+@media (max-width: 640px) { .creator-hero { flex-direction: column; text-align: center; } }
