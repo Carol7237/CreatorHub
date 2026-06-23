@@ -1,6 +1,7 @@
 package com.creatorhub.service.impl;
 
 import com.creatorhub.common.PageableUtils;
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.PagedResponse;
 import com.creatorhub.dto.SubscriptionRequest;
 import com.creatorhub.dto.SubscriptionResponse;
@@ -19,6 +20,7 @@ import com.creatorhub.service.SubscriptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,7 +34,6 @@ import java.util.Set;
 @Slf4j
 public class SubscriptionServiceImpl implements SubscriptionService {
 
-    /** Whitelisted sort properties for subscriptions. */
     private static final Set<String> ALLOWED_SORT = Set.of("id", "startDate", "status");
 
     private final SubscriptionRepository subscriptionRepository;
@@ -40,9 +41,9 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     private final SubscriptionTierRepository tierRepository;
 
     @Override
-    public SubscriptionResponse create(SubscriptionRequest request) {
-        User fan = userRepository.findById(request.getFanId())
-                .orElseThrow(() -> new ResourceNotFoundException("User", request.getFanId()));
+    public SubscriptionResponse create(SubscriptionRequest request, Viewer viewer) {
+        User fan = userRepository.findById(viewer.userId())
+                .orElseThrow(() -> new ResourceNotFoundException("User", viewer.userId()));
         SubscriptionTier tier = tierRepository.findById(request.getTierId())
                 .orElseThrow(() -> new ResourceNotFoundException("SubscriptionTier", request.getTierId()));
 
@@ -53,8 +54,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         }
 
         // Cannot have two active subscriptions to the same tier.
-        if (subscriptionRepository.existsByFanIdAndTierIdAndStatus(
-                fan.getId(), tier.getId(), SubStatus.ACTIVE)) {
+        if (subscriptionRepository.existsByFanIdAndTierIdAndStatus(fan.getId(), tier.getId(), SubStatus.ACTIVE)) {
             log.warn("Rejected duplicate active subscription: fan={} tier={}", fan.getId(), tier.getId());
             throw new DuplicateResourceException(
                     "Fan " + fan.getId() + " already has an active subscription to tier " + tier.getId());
@@ -87,7 +87,6 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     @Transactional(readOnly = true)
     public PagedResponse<SubscriptionResponse> findAll(Pageable pageable) {
         Pageable safe = PageableUtils.sanitize(pageable, ALLOWED_SORT);
-        log.debug("findAll subscriptions page={} size={} sort={}", safe.getPageNumber(), safe.getPageSize(), safe.getSort());
         return PagedResponse.from(subscriptionRepository.findAll(safe).map(SubscriptionMapper::toResponse));
     }
 
@@ -120,19 +119,29 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     }
 
     @Override
-    public SubscriptionResponse cancel(Long id) {
+    public SubscriptionResponse cancel(Long id, Viewer viewer) {
         Subscription subscription = getOrThrow(id);
+        assertOwnerOrAdmin(subscription, viewer);
         if (subscription.getStatus() == SubStatus.CANCELLED) {
             throw new BusinessRuleException("Subscription " + id + " is already cancelled");
         }
         subscription.setStatus(SubStatus.CANCELLED);
+        log.info("Subscription cancelled: id={}", id);
         return SubscriptionMapper.toResponse(subscription);
     }
 
     @Override
-    public void delete(Long id) {
+    public void delete(Long id, Viewer viewer) {
         Subscription subscription = getOrThrow(id);
+        assertOwnerOrAdmin(subscription, viewer);
         subscriptionRepository.delete(subscription);
+    }
+
+    private void assertOwnerOrAdmin(Subscription subscription, Viewer viewer) {
+        Long ownerId = subscription.getFan() != null ? subscription.getFan().getId() : null;
+        if (!viewer.isOwnerOrAdmin(ownerId)) {
+            throw new AccessDeniedException("You can only manage your own subscriptions");
+        }
     }
 
     private Subscription getOrThrow(Long id) {

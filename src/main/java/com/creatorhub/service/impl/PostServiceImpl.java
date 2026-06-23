@@ -1,6 +1,7 @@
 package com.creatorhub.service.impl;
 
 import com.creatorhub.common.PageableUtils;
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.PagedResponse;
 import com.creatorhub.dto.PostRequest;
 import com.creatorhub.dto.PostResponse;
@@ -11,7 +12,9 @@ import com.creatorhub.model.Post;
 import com.creatorhub.model.SubscriptionTier;
 import com.creatorhub.model.Tag;
 import com.creatorhub.model.User;
+import com.creatorhub.model.enums.SubStatus;
 import com.creatorhub.repository.PostRepository;
+import com.creatorhub.repository.SubscriptionRepository;
 import com.creatorhub.repository.SubscriptionTierRepository;
 import com.creatorhub.repository.TagRepository;
 import com.creatorhub.repository.UserRepository;
@@ -19,11 +22,11 @@ import com.creatorhub.service.PostService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -40,11 +43,12 @@ public class PostServiceImpl implements PostService {
     private final UserRepository userRepository;
     private final SubscriptionTierRepository tierRepository;
     private final TagRepository tagRepository;
+    private final SubscriptionRepository subscriptionRepository;
 
     @Override
-    public PostResponse create(PostRequest request) {
-        User author = userRepository.findById(request.getAuthorId())
-                .orElseThrow(() -> new ResourceNotFoundException("User", request.getAuthorId()));
+    public PostResponse create(PostRequest request, Viewer viewer) {
+        User author = userRepository.findById(viewer.userId())
+                .orElseThrow(() -> new ResourceNotFoundException("User", viewer.userId()));
 
         SubscriptionTier tier = resolveTierForPost(request.isPremium(), request.getTierId(), author);
 
@@ -58,58 +62,34 @@ public class PostServiceImpl implements PostService {
 
         Post saved = postRepository.save(post);
         log.info("Post published: id={} creator={} premium={}", saved.getId(), author.getId(), saved.isPremium());
-        return PostMapper.toResponse(saved);
+        return toResponse(saved, viewer);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public PostResponse findById(Long id) {
-        return PostMapper.toResponse(getOrThrow(id));
+    public PostResponse findById(Long id, Viewer viewer) {
+        return toResponse(getOrThrow(id), viewer);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<PostResponse> findAll() {
-        return postRepository.findAll().stream().map(PostMapper::toResponse).toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public PagedResponse<PostResponse> findAll(Pageable pageable) {
+    public PagedResponse<PostResponse> findAll(Pageable pageable, Viewer viewer) {
         Pageable safe = PageableUtils.sanitize(pageable, ALLOWED_SORT);
         log.debug("findAll posts page={} size={} sort={}", safe.getPageNumber(), safe.getPageSize(), safe.getSort());
-        return PagedResponse.from(postRepository.findAll(safe).map(PostMapper::toResponse));
+        return PagedResponse.from(postRepository.findAll(safe).map(post -> toResponse(post, viewer)));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<PostResponse> findByCreator(Long creatorId) {
-        return postRepository.findByAuthorId(creatorId).stream().map(PostMapper::toResponse).toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public PagedResponse<PostResponse> findByCreator(Long creatorId, Pageable pageable) {
+    public PagedResponse<PostResponse> findByCreator(Long creatorId, Pageable pageable, Viewer viewer) {
         Pageable safe = PageableUtils.sanitize(pageable, ALLOWED_SORT);
-        return PagedResponse.from(postRepository.findByAuthorId(creatorId, safe).map(PostMapper::toResponse));
+        return PagedResponse.from(postRepository.findByAuthorId(creatorId, safe).map(post -> toResponse(post, viewer)));
     }
 
     @Override
-    @Transactional(readOnly = true)
-    public List<PostResponse> findByPremium(boolean premium) {
-        return postRepository.findByPremium(premium).stream().map(PostMapper::toResponse).toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<PostResponse> findByCreatorAndPremium(Long creatorId, boolean premium) {
-        return postRepository.findByAuthorIdAndPremium(creatorId, premium).stream()
-                .map(PostMapper::toResponse).toList();
-    }
-
-    @Override
-    public PostResponse update(Long id, PostRequest request) {
+    public PostResponse update(Long id, PostRequest request, Viewer viewer) {
         Post post = getOrThrow(id);
+        assertOwnerOrAdmin(post, viewer);
 
         if (request.getTitle() != null) {
             post.setTitle(request.getTitle());
@@ -127,22 +107,60 @@ public class PostServiceImpl implements PostService {
             post.setTags(resolveTags(request.getTags()));
         }
 
-        return PostMapper.toResponse(post);
+        return toResponse(post, viewer);
     }
 
     @Override
-    public void delete(Long id) {
-        // Comments cascade (orphanRemoval); join rows in post_tags are removed by
-        // the owning side, while the tags themselves stay (shared). So a plain
-        // delete is safe here.
+    public void delete(Long id, Viewer viewer) {
         Post post = getOrThrow(id);
+        assertOwnerOrAdmin(post, viewer);
         postRepository.delete(post);
+        log.info("Post deleted: id={} by user={}", id, viewer.userId());
+    }
+
+    // --- premium gating ---
+
+    /** Maps a post, hiding the body of premium posts the viewer cannot access. */
+    private PostResponse toResponse(Post post, Viewer viewer) {
+        PostResponse dto = PostMapper.toResponse(post);
+        if (post.isPremium() && !canAccessBody(post, viewer)) {
+            dto.setBody(null);
+            dto.setLocked(true);
+        }
+        return dto;
     }
 
     /**
-     * Enforces: a premium post must have a tier; a free post must not; and the
-     * tier must belong to the post's author.
+     * Body of a premium post is visible only to: the author, an ADMIN, or a fan
+     * with an ACTIVE subscription to the post's tier.
      */
+    private boolean canAccessBody(Post post, Viewer viewer) {
+        if (!post.isPremium()) {
+            return true;
+        }
+        if (viewer.admin()) {
+            return true;
+        }
+        Long uid = viewer.userId();
+        if (uid == null) {
+            return false;
+        }
+        if (post.getAuthor() != null && uid.equals(post.getAuthor().getId())) {
+            return true;
+        }
+        if (post.getTier() == null) {
+            return false;
+        }
+        return subscriptionRepository.existsByFanIdAndTierIdAndStatus(uid, post.getTier().getId(), SubStatus.ACTIVE);
+    }
+
+    private void assertOwnerOrAdmin(Post post, Viewer viewer) {
+        Long ownerId = post.getAuthor() != null ? post.getAuthor().getId() : null;
+        if (!viewer.isOwnerOrAdmin(ownerId)) {
+            throw new AccessDeniedException("You can only modify your own posts");
+        }
+    }
+
     private SubscriptionTier resolveTierForPost(boolean premium, Long tierId, User author) {
         if (premium && tierId == null) {
             throw new BusinessRuleException("A premium post must reference a tier");

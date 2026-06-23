@@ -1,5 +1,6 @@
 package com.creatorhub.service.impl;
 
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.ProfileRequest;
 import com.creatorhub.dto.ProfileResponse;
 import com.creatorhub.dto.mapper.ProfileMapper;
@@ -8,6 +9,7 @@ import com.creatorhub.model.Profile;
 import com.creatorhub.repository.ProfileRepository;
 import com.creatorhub.service.ProfileService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,8 +43,12 @@ public class ProfileServiceImpl implements ProfileService {
     }
 
     @Override
-    public ProfileResponse update(Long id, ProfileRequest request) {
+    public ProfileResponse update(Long id, ProfileRequest request, Viewer viewer) {
         Profile profile = getOrThrow(id);
+        Long ownerId = profile.getUser() != null ? profile.getUser().getId() : null;
+        if (!viewer.isOwnerOrAdmin(ownerId)) {
+            throw new AccessDeniedException("You can only edit your own profile");
+        }
         if (request.getDisplayName() != null && !request.getDisplayName().isBlank()) {
             profile.setDisplayName(request.getDisplayName());
         }

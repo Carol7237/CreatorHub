@@ -1,13 +1,14 @@
 package com.creatorhub.dto;
 
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Input for creating a subscription. startDate and status are set by the service
- * (today / ACTIVE), not supplied by the caller.
+ * Create input for a subscription. The fan is NOT in the body — it comes from the
+ * authenticated user. startDate/status are set by the service (today / ACTIVE).
  */
 @Data
 @Builder
@@ -15,6 +16,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class SubscriptionRequest {
 
-    private Long fanId;
+    @NotNull(message = "tierId is required")
     private Long tierId;
 }

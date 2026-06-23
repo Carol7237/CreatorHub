@@ -1,15 +1,15 @@
 package com.creatorhub.service;
 
+import com.creatorhub.common.Viewer;
 import com.creatorhub.dto.ProfileRequest;
 import com.creatorhub.dto.ProfileResponse;
 
 import java.util.List;
 
 /**
- * Profile is a dependent of {@link UserService}: it is created automatically
- * when a user is created and removed (cascade) when the user is deleted.
- * Therefore this service intentionally exposes only read + update, not
- * standalone create/delete (a profile cannot exist without its user).
+ * Profile is a dependent of {@link UserService}: it is created automatically with
+ * the user and removed (cascade) with it. Hence read + update only (no standalone
+ * create/delete). Update is restricted to the profile's owner (or an admin).
  */
 public interface ProfileService {
 
@@ -19,5 +19,5 @@ public interface ProfileService {
 
     List<ProfileResponse> findAll();
 
-    ProfileResponse update(Long id, ProfileRequest request);
+    ProfileResponse update(Long id, ProfileRequest request, Viewer viewer);
 }
