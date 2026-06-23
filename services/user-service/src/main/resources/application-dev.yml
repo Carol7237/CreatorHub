@@ -1,0 +1,27 @@
+# DEV profile — local development against the PostgreSQL 16 container.
+# Start the database first:  docker compose up -d   (from the repo root)
+#
+# Schema-per-service: the User Service owns the "users_svc" schema in the shared
+# "creatorhub" database (decision in NEXT_STEPS.md §3). Hibernate creates the
+# schema (create_namespaces) and its tables there.
+spring:
+  datasource:
+    # Host port 5433 -> container 5432 (shared with the monolith's database).
+    url: jdbc:postgresql://localhost:5433/creatorhub
+    username: creatorhub
+    password: creatorhub
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      # Dev convenience: keep the schema in sync with the entities. Replaced by
+      # versioned migrations (Flyway/Liquibase) before any production use.
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        # All this service's tables (users, profile) live in users_svc.
+        default_schema: users_svc
+        # Let Hibernate CREATE the schema/namespace if it does not exist yet.
+        hbm2ddl:
+          create_namespaces: true

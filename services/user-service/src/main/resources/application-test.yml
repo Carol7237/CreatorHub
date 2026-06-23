@@ -1,0 +1,21 @@
+# TEST profile — H2 in-memory, no external infrastructure (no Docker, no Eureka).
+# Activated by @ActiveProfiles("test") on the test classes.
+spring:
+  datasource:
+    # In-memory DB. MODE=PostgreSQL aligns H2's types/SQL with PostgreSQL so the
+    # same entity mappings work on both. DB_CLOSE_DELAY=-1 keeps it alive per JVM.
+    url: jdbc:h2:mem:userservice_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    hibernate:
+      # Fresh schema created on startup, dropped on shutdown — clean per run.
+      ddl-auto: create-drop
+    show-sql: false
+
+# No discovery during tests: don't try to register with or fetch from Eureka.
+eureka:
+  client:
+    enabled: false
