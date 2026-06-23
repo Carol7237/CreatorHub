@@ -38,3 +38,14 @@ eureka:
       defaultZone: http://localhost:8761/eureka/
   instance:
     prefer-ip-address: true
+
+# Monitoring: expose the Prometheus scrape endpoint and tag metrics by service.
+# Resilience4j circuit-breaker metrics (resilience4j_circuitbreaker_*) are exported too.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      application: ${spring.application.name}
