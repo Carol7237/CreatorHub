@@ -124,8 +124,13 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   Validation pe DTO-uri, `GlobalExceptionHandler` extins (400 cu fieldErrors,
   JSON malformat → 400), pagini de eroare custom (404/500), CORS pentru React,
   Swagger (springdoc). Verificat: **105 teste** verzi + smoke runtime. Detalii §14.
-- [ ] **Faza 7B (următoarea) — Frontend React:** SPA care consumă API-ul (login,
-  CRUD, gating premium), apoi microservicii, cache Redis, MongoDB, monitorizare.
+- [x] **Faza 7B — Frontend React (COMPLETĂ, 2026-06-23):** SPA React 18 + TS +
+  Vite în `/frontend`, temă cyberpunk dark-violet cu glow + animații (Framer
+  Motion), CRUD complet prin UI, gating premium vizual, validare client-side,
+  CSRF prin Vite proxy (same-origin). 11 pagini. Verificat end-to-end (login,
+  feed, gating, 404). Detalii §15. **TOT textul UI în engleză.**
+- [ ] **Faza 8 (următoarea) — Microservicii** (Spring Cloud: Eureka, Gateway,
+  Config, Resilience4j), apoi cache Redis, MongoDB, monitorizare (Prometheus/Grafana).
 
 ## 6. Comenzi utile
 
@@ -516,3 +521,52 @@ citibil, CSRF merge ca la pagina statică; (b) endpoint `GET /api/auth/csrf` car
 ### Swagger / OpenAPI
 `springdoc-openapi-starter-webmvc-ui` 2.8.17. UI: `/swagger-ui.html` (→ `/swagger-ui/index.html`),
 spec: `/v3/api-docs`. Permise în `SecurityConfig` (dev). Verificat 200 la runtime.
+
+## 15. Frontend React (Faza 7B)
+
+SPA separat în **`/frontend`** (NU se amestecă cu backend-ul Spring din `/src`).
+
+### Stack
+React 18 + **TypeScript** + **Vite**. Rutare: **React Router v6**. Data fetching:
+**TanStack Query** (axios `withCredentials`). Animații: **Framer Motion**.
+Formulare + validare client-side: **React Hook Form**. Styling: **CSS custom**
+(temă în `src/index.css` + CSS per componentă) — ales pentru control total pe
+glow/gradienturi/animații.
+
+### Structură
+- `src/api/` — `client.ts` (axios + interceptor CSRF), `endpoints.ts` (toate
+  endpoint-urile §14). `src/types.ts` (oglindesc DTO-urile).
+- `src/auth/AuthContext.tsx` — user curent (`/api/auth/me`), login/register/logout.
+  `components/ProtectedRoute.tsx` (redirect la `/login`, `requireAdmin`).
+- `src/components/` — Layout (header/nav), PostCard (cu overlay-ul premium blocat),
+  Page (tranziție), Field, Pagination, ui (Avatar/Badge/Spinner/Skeleton/CountUp/
+  EmptyState/Alert + variante de stagger).
+- `src/pages/` (11): Feed, Login, Register, PostDetail, Creator (listă + profil),
+  CreatePost (create/edit), Tiers, Subscriptions, ProfileEdit, Admin, NotFound (404).
+
+### Integrare CSRF (decizia §14, opțiunea recomandată)
+**Vite dev proxy** (`vite.config.ts`): `/api` → `http://localhost:8081`. Astfel SPA
+e same-origin cu API-ul → cookie-ul `XSRF-TOKEN` e citibil de JS. Interceptorul
+axios citește cookie-ul și-l pune în header-ul `X-XSRF-TOKEN` pe POST/PUT/DELETE
+(amorsează cu `GET /api/auth/csrf` la nevoie). Sesiunea pe cookie (backend).
+Verificat end-to-end prin proxy: csrf → login admin → me → 200.
+
+### Temă de design
+Cyberpunk / night-owl: fundal near-black cu glow radial violet + grilă animată;
+accent **violet electric** (`#a855f7`/`#7c3aed`/`#c026d3`) cu gradienturi și
+**glow** (box-shadow violet) pe butoane/carduri/avatare. Fonturi Google: **Space
+Grotesk** (display) + **Inter** (body). Badge-uri FREE (teal) / PREMIUM (gradient
++ lacăt). Cardul premium blocat = momentul-vedetă (body blurat, orb-lacăt cu glow
+pulsatil, buton "Unlock"). Animații: page transitions (fade+slide), stagger pe
+liste, hover lift+glow pe carduri, like cu puls, count-up pe statistici, skeleton
+shimmer. Respectă `prefers-reduced-motion`.
+
+### Validare client-side + erori
+React Hook Form validează pe client (required, lungimi, email, preț > 0). La 400
+de la backend, `fieldErrors` se mapează pe câmpurile formularului (`setError`).
+401 → redirect login; 403 → mesaj "no access"; 404 → pagina 404 React.
+
+### Rulare
+`cd frontend && npm install && npm run dev` → `http://localhost:5173` (backend pe
+dev + Docker trebuie pornite). Build: `npm run build` (0 erori TS). **Tot textul
+UI e în engleză.** Admin dev: `admin` / `admin123`.

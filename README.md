@@ -37,6 +37,33 @@ the container's 5432; database `creatorhub`, user `creatorhub`, password
 Both ports avoid common dev-machine conflicts (a native PostgreSQL on 5432, an
 Oracle listener on 8080).
 
+## Frontend (React SPA)
+
+A separate React + TypeScript + Vite app lives in [`frontend/`](frontend). It is
+a night-owl cyberpunk UI (dark + electric violet, glow, motion) that consumes the
+REST API. Prerequisite: Node.js 18+.
+
+```bash
+# run the full stack
+docker compose up -d          # database
+./mvnw spring-boot:run        # backend on :8081 (dev profile)
+
+cd frontend
+npm install
+npm run dev                   # frontend on http://localhost:5173
+```
+
+Open **http://localhost:5173**. The Vite dev server proxies `/api` to the backend
+on `:8081`, which keeps the SPA same-origin with the API so the cookie-based CSRF
+flow works (see [CLAUDE.md](CLAUDE.md) §15). Log in on dev with `admin` / `admin123`,
+or register a new account. All UI text is in English.
+
+Stack: React Router, TanStack Query, Framer Motion (animations), React Hook Form
+(validation). Pages: feed (with premium gating), post detail + comments, creators,
+tiers, subscriptions, create/edit post, profile, admin, and a custom 404.
+
+> Screenshots: add under `docs/screenshots/` (feed, premium lock overlay, login).
+
 ## Environments (Spring profiles)
 
 Two profiles, each backed by its own database:
