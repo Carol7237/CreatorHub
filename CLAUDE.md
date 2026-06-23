@@ -43,7 +43,8 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
 - Profiluri Spring: `dev` (PostgreSQL/Docker) și `test` (H2 in-memory) — vezi §10.
 - Securitate: Spring Security (sesiune, BCrypt, CSRF, roluri) — vezi §11.
 - Paginare/sortare (`PagedResponse`) + logging (Logback, AOP) — vezi §12.
-- Testare: JaCoCo + unit (Mockito) + integration (H2); 89 teste — vezi §13.
+- Testare: JaCoCo + unit (Mockito) + integration (H2); 105 teste — vezi §13/§14.
+- REST API + validare + erori + CORS + Swagger (springdoc) — vezi §14.
 - Build tool: Maven (NU Gradle)
 
 ## 3. Reguli de lucru (valabile pentru tot proiectul)
@@ -117,10 +118,14 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   `service.impl`); **64 unit tests** Mockito izolate (7 service impls) + 25 teste
   de integrare (H2). Coverage service layer: **89.1% line** (gate trece). Total
   **89 teste** verzi. Detalii în §13.
-- [ ] **Faza 7 (următoarea) — Views / REST:** controllere REST pentru restul
-  entităților, Bean Validation pe DTO-uri, extinderea `GlobalExceptionHandler`
-  (validare input → 400 cu erori pe câmpuri), apoi microservicii, cache Redis,
-  MongoDB, monitorizare, React.
+- [x] **Faza 7A — REST controllers + Bean Validation + erori (COMPLETĂ, 2026-06-23):**
+  controllere REST pentru toate entitățile pe convenția §11, owner-din-context
+  (`CurrentUserService` + `Viewer`), gating premium + comentarii premium, Bean
+  Validation pe DTO-uri, `GlobalExceptionHandler` extins (400 cu fieldErrors,
+  JSON malformat → 400), pagini de eroare custom (404/500), CORS pentru React,
+  Swagger (springdoc). Verificat: **105 teste** verzi + smoke runtime. Detalii §14.
+- [ ] **Faza 7B (următoarea) — Frontend React:** SPA care consumă API-ul (login,
+  CRUD, gating premium), apoi microservicii, cache Redis, MongoDB, monitorizare.
 
 ## 6. Comenzi utile
 
@@ -425,3 +430,89 @@ Docker). Cele **3 scenarii end-to-end**:
 ### Comenzi
 - `./mvnw clean test` → toate testele + raport coverage.
 - `./mvnw clean verify` → în plus, gate-ul de coverage (eșuează dacă service < 70%).
+
+> Notă: la Faza 7A coverage-ul pe service e **87% line** (105 teste); detalii §14.
+
+## 14. REST API + Validare + Erori (Faza 7A)
+
+### Userul curent & owner-din-context (fix de securitate)
+- `CurrentUserService` (security) citește `SecurityContextHolder` → întoarce un
+  `Viewer(userId, admin)` (record în `common`). `currentViewer()` (anonim permis),
+  `requireViewer()` (403 dacă anonim).
+- **Controllerele** resolvă `Viewer` și-l pasează în service. **Owner-ul NU mai
+  vine din body** — la create, owner = `viewer.userId()` (Post.author, Tier.creator,
+  Subscription.fan, Comment.author). DTO-urile de Request **NU mai au** authorId/
+  creatorId/fanId. Update/delete: doar owner-ul sau ADMIN (`AccessDeniedException`→403).
+
+### Gating premium (citire)
+- `PostResponse` are flag `locked`. Pentru un post premium, **body-ul e vizibil
+  doar pentru: autor, ADMIN, sau fan cu abonament ACTIV la tier-ul postării**.
+  Altfel `locked=true` + `body=null` (omis din JSON via `@JsonInclude(NON_NULL)`).
+  Coerent la listă ȘI la `GET /{id}` (NU 403 — metadata rămâne vizibilă, doar
+  body-ul e ascuns). Implementat în service (`canAccessBody`).
+- **Comentarii premium** (regula amânată de la Faza 2): pe un post premium pot
+  comenta doar autor/ADMIN/abonat activ; altfel **403**.
+
+### Endpoint-uri REST (resource → metode → auth → cod)
+| Endpoint | Auth | Cod |
+|---|---|---|
+| `POST /api/auth/register` | public | 201 |
+| `POST /api/auth/login` · `GET /api/auth/csrf` | public | 200 |
+| `POST /api/auth/logout` · `GET /api/auth/me` | auth | 200 |
+| `GET /api/posts` (paged, gated) · `GET /api/posts/{id}` · `GET /api/posts/{id}/comments` | public | 200 |
+| `POST /api/posts` | auth | 201 |
+| `PUT/DELETE /api/posts/{id}` | owner/admin | 200/204 |
+| `GET /api/creators` · `/{id}` · `/{id}/posts` · `/{id}/tiers` | public | 200 |
+| `GET /api/profiles/{id}` · `/user/{userId}` | public | 200 |
+| `PUT /api/profiles/{id}` | owner/admin | 200 |
+| `GET /api/tags` · `/{id}` | public | 200 |
+| `POST /api/tags` | auth | 201 |
+| `DELETE /api/tags/{id}` | ADMIN | 204 |
+| `GET /api/tiers/{id}` | auth | 200 |
+| `POST /api/tiers` | auth | 201 |
+| `PUT/DELETE /api/tiers/{id}` | owner/admin | 200/204 |
+| `GET /api/subscriptions` (ale mele) | auth | 200 |
+| `POST /api/subscriptions` | auth | 201 |
+| `POST /api/subscriptions/{id}/cancel` · `DELETE /{id}` | owner/admin | 200/204 |
+| `POST /api/comments` · `PUT/DELETE /{id}` | auth (owner/admin) | 201/200/204 |
+| `GET /api/admin/users` · `DELETE /api/admin/users/{id}` | ADMIN | 200/204 |
+
+### Bean Validation (pe Request DTO-uri, cu `@Valid` în controllere)
+- `RegisterRequest`: username `@NotBlank @Size(3,50)`, email `@NotBlank @Email`,
+  password `@NotBlank @Size(min=8)`, displayName `@Size(max=100)`.
+- `PostRequest`: title `@NotBlank @Size(max=200)`, body `@Size(max=20000)`.
+- `SubscriptionTierRequest`: name `@NotBlank @Size(max=100)`, priceMonthly
+  `@NotNull @DecimalMin("0.01")`, perks `@Size(max=2000)`.
+- `SubscriptionRequest`: tierId `@NotNull`. `CommentRequest`: text
+  `@NotBlank @Size(max=1000)`, postId `@NotNull`. `TagRequest`: name
+  `@NotBlank @Size(max=50)`. `ProfileRequest`: câmpuri `@Size` (update parțial).
+
+### Răspuns de eroare (validare) — `GlobalExceptionHandler` extins
+- `MethodArgumentNotValidException` → **400** cu `fieldErrors` (câmp→mesaj):
+```json
+{ "timestamp":"...", "status":400, "error":"Bad Request", "message":"Validation failed",
+  "path":"/api/tiers", "fieldErrors": { "name":"Tier name is required",
+  "priceMonthly":"Monthly price must be greater than 0" } }
+```
+- `HttpMessageNotReadableException` (JSON malformat) → **400** (rezolvă limitarea
+  de la Faza 5). Restul: 404/409/400 domeniu, 401/403 securitate — toate
+  `ApiErrorResponse` (cu `@JsonInclude(NON_NULL)`).
+
+### Pagini de eroare custom
+`static/error/404.html` + `static/error/500.html` (servite de `BasicErrorController`
+pentru rute de browser; înlocuiesc Whitelabel). API → JSON. Rutele necunoscute
+non-API → 404 custom (config: `/api/**` rămâne securizat, restul `permitAll` ca să
+randeze 404 nu 401). React va avea propriile pagini la 7B.
+
+### CORS (pentru React) + CSRF
+`CorsConfigurationSource`: origini dev `http://localhost:5173`, `:3000`,
+`allowCredentials=true`, header-e `*`. **Tensiune CORS+CSRF cross-origin:** un SPA
+pe alt origin NU poate citi cookie-ul `XSRF-TOKEN` (JS e same-origin). Soluții:
+(a) **recomandat** — Vite dev proxy (`/api` → `:8081`) → same-origin, cookie-ul e
+citibil, CSRF merge ca la pagina statică; (b) endpoint `GET /api/auth/csrf` care
+întoarce tokenul în body (citibil cross-origin) → React îl pune în `X-XSRF-TOKEN`.
+În prod: același origin (reverse proxy) + origini CORS restrânse.
+
+### Swagger / OpenAPI
+`springdoc-openapi-starter-webmvc-ui` 2.8.17. UI: `/swagger-ui.html` (→ `/swagger-ui/index.html`),
+spec: `/v3/api-docs`. Permise în `SecurityConfig` (dev). Verificat 200 la runtime.

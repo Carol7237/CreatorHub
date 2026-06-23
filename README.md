@@ -89,6 +89,42 @@ See [CLAUDE.md](CLAUDE.md) §11 for the full security design (login-page decisio
 CSRF for SPA, remember-me, URL authorization convention, and how JWT will be added
 on top at the microservices stage).
 
+## REST API & docs
+
+The backend is a REST API under `/api`. Interactive documentation is generated
+with **springdoc / Swagger UI**:
+
+- Swagger UI: [`/swagger-ui.html`](http://localhost:8081/swagger-ui.html)
+- OpenAPI spec: [`/v3/api-docs`](http://localhost:8081/v3/api-docs)
+
+Highlights (full table in [CLAUDE.md](CLAUDE.md) §14):
+
+- Resources: `posts`, `creators`, `profiles`, `tiers`, `subscriptions`, `comments`,
+  `tags`, plus `auth` and `admin`. Standard verbs (GET/POST/PUT/DELETE) and codes
+  (200/201/204/400/401/403/404/409).
+- **Owner from context:** create requests do NOT take an owner id — the owner is
+  the authenticated user. Update/delete require the owner (or an admin).
+- **Premium gating:** premium posts come back `locked: true` with no `body` unless
+  you’re the author, an admin, or an active subscriber. Same rule gates commenting
+  on premium posts.
+- **Validation:** invalid request bodies return `400` with a `fieldErrors` map
+  (field → message). Malformed JSON also returns `400`.
+
+```jsonc
+// 400 example
+{ "status": 400, "error": "Bad Request", "message": "Validation failed",
+  "fieldErrors": { "name": "Tier name is required",
+                   "priceMonthly": "Monthly price must be greater than 0" } }
+```
+
+### CORS (for the React SPA in 7B)
+
+CORS allows the dev front-end origins `http://localhost:5173` / `:3000` with
+credentials. Because a cross-origin SPA cannot read the `XSRF-TOKEN` cookie, the
+**recommended dev setup is a Vite proxy** (`/api` → `:8081`, same-origin), or the
+SPA can read the token from `GET /api/auth/csrf` and send it in `X-XSRF-TOKEN`.
+Custom server error pages live at `static/error/404.html` and `500.html`.
+
 ## Pagination & sorting
 
 `Post`, `User` and `Subscription` support pagination and sorting. The service
