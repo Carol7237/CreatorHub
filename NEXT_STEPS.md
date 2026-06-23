@@ -168,6 +168,26 @@ Commit-uri mici: `feat(eureka): ...`, `feat(gateway): ...`, `feat(probe): ...`.
    >   Sugestie ordine: **Subscription** apoi **Content** (Content depinde de Subscription
    >   pentru gating). Refolosește pattern-ul din user-service (modul + common + Eureka +
    >   rută gateway + schema proprie). Monolitul se curăță DOAR la final.
+
+   > ### ✅ PASUL 3 — Subscription + Content + gating rezilient COMPLET (2026-06-23)
+   > Ambele servicii mutate împreună (Content depinde de Subscription pt gating). Detalii
+   > complete: **CLAUDE.md §18**. Pe scurt:
+   > - **`subscription-service`** (port **8093**, schema **`subs_svc`**): Tier (creatorId
+   >   Long) + Subscription (fanId Long) + SubStatus; endpoint intern
+   >   `GET /internal/subscriptions/access?fanId=&tierId=` (contractul de gating).
+   > - **`content-service`** (port **8094**, schema **`content_svc`**): Post/Comment/Tag
+   >   (authorId/tierId Long); gating premium = apel **OpenFeign** Content→Subscription,
+   >   protejat de **Resilience4j circuit breaker + fallback FAIL-CLOSED** (post rămâne
+   >   locked dacă Subscription e jos — `ResilienceConfig`, timeout 3s, prag 50%).
+   > - **Identitate (Opțiunea 1, decisă cu utilizatorul):** gateway injectează
+   >   `X-User-Id`/`X-User-Roles`/`X-User-Name` (rezolvând `/api/auth/me`), **ștergând**
+   >   headerele venite din exterior (anti-spoofing). Downstream stateless + filtru
+   >   header→SecurityContext (toate în `common`). Tranzitoriu pre-JWT.
+   > - **Rute gateway:** `/api/tiers|subscriptions/**`→subscription; `/api/posts|comments|tags/**`→content.
+   > - **Verificat prin gateway (8085):** gating (abonat vede / neabonat locked / autor+admin văd),
+   >   circuit breaker (subscription oprit → locked, nu 500), anti-spoofing (X-User-Id fals → 401/ignorat),
+   >   scheme separate. **61 teste verzi** (28 user + 14 subs + 19 content).
+   > - **RĂMAS:** Notification Service (MongoDB) — vezi pașii 3-10 de mai jos.
 3. **Config Server** (`spring-cloud-config-server`) — externalizează `application.yml`-urile
    (porturi, datasource, secrete) într-un repo de config (Git sau `native`).
 4. **Resilience4j** pe apelurile cross-service (mai ales gating-ul premium): circuit

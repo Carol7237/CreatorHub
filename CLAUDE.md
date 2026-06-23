@@ -191,8 +191,18 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
     + Profile + auth complet (sesiune+BCrypt+CSRF+roluri). **28 teste verzi.** Validat prin
     gateway: register/login/me + admin 403(USER)/200(ADMIN), parolă BCrypt în `users_svc`.
     probe-service eliminat. Detalii §17.
-  - [ ] **Pasul 3+ — restul serviciilor** (Subscription, Content, Notification), apoi Config
-    Server, Resilience4j, monitoring, Redis, Mongo, JWT. Vezi `NEXT_STEPS.md` §5.
+  - [x] **Pasul 3 — Subscription + Content + apel inter-service rezilient (COMPLET, 2026-06-23):**
+    `services/subscription-service` (port **8093**, schema **`subs_svc`**) și
+    `services/content-service` (port **8094**, schema **`content_svc`**). Primul apel
+    inter-service real: gating premium Content→Subscription (OpenFeign `lb://`) protejat
+    de **Resilience4j circuit breaker + fallback fail-closed**. Identitate propagată prin
+    **headere injectate de gateway** (decizia §3 din prompt: Opțiunea 1; gateway șterge
+    headerele externe = anti-spoofing). **61 teste verzi** (28 user + 14 subs + 19 content).
+    Validat prin gateway: tier→post premium→abonare, gating (fan abonat vede / neabonat
+    locked / autor+admin văd), circuit breaker (subscription oprit → locked, nu 500),
+    anti-spoofing (X-User-Id fals → ignorat). Detalii §18.
+  - [ ] **Pasul 4+ — Notification Service** (MongoDB), apoi Config Server, monitoring
+    (Prometheus/Grafana), Redis, JWT distribuit, Docker Compose, deploy. Vezi `NEXT_STEPS.md` §5.
 
 ## 6. Comenzi utile
 
@@ -746,3 +756,80 @@ la un pas ulterior (frontend-ul lovește încă monolitul pe 8081 — NEATINS î
 Subscription Service (`tiers`, `subscriptions`), Content Service (`posts`, `comments`, `tags`
 + gating premium cross-service), Notification Service (MongoDB). Apoi Config Server,
 Resilience4j, monitoring, Redis, JWT distribuit. Monolitul se curăță DOAR la final.
+
+## 18. Microservicii — Subscription + Content + apel inter-service rezilient (Faza 8, Pasul 3)
+
+> Ramura `microservices`. Monolitul de pe `main` (src/ + frontend/) NEATINS. Două servicii
+> mutate împreună, fiindcă Content depinde de Subscription pentru gating-ul premium.
+
+### Subscription Service (`services/subscription-service`, port 8093, schema `subs_svc`)
+`SubscriptionTier` (creator referit prin `Long creatorId`, fără FK cross-service) +
+`Subscription` (`Long fanId`; `tier` rămâne relație JPA normală — același serviciu) + enum
+`SubStatus`. Regulile din monolit păstrate: preț > 0, **fan ≠ creator** (acum compari `fanId`
+cu `creatorId`), fără a 2-a abonare ACTIVĂ (`existsByFanIdAndTierIdAndStatus`), `startDate`=azi,
+`cancel`. Owner-din-context (creatorId/fanId din identitatea injectată). **delete tier** blochează
+doar pe subscriptions locale (verificarea „gated posts" e cross-service → amânată).
+
+### Content Service (`services/content-service`, port 8094, schema `content_svc`)
+`Post` (`Long authorId`, `Long tierId` — ambele referințe prin id, fără FK) + `Comment`
+(`Long authorId`) + `Tag` (`post_tags` N:N) — relațiile Post↔Comment/Tag rămân JPA normale
+(același serviciu). Regulile din monolit: premium ⇒ tierId, free ⇒ fără tier, get-or-create tags,
+paginare/sortare (refolosește `PagedResponse`/`PageableUtils` din `common`). *Validarea „tier-ul
+aparține autorului" e cross-service → amânată; un tierId bogus lasă postarea locked (fail-closed),
+nu e gaură de securitate.*
+
+### Contractul inter-service (gating premium)
+`GET /internal/subscriptions/access?fanId=&tierId=` → `{fanId, tierId, active}` (boolean ACTIV).
+Sub `/internal/**`, **NErutат de gateway** → reachable doar service-to-service. Content îl apelează
+prin **OpenFeign** `@FeignClient(name="subscription-service")` (`lb://`, discovery + load-balancing).
+Regula gating: body-ul unui post premium e vizibil pt **autor (authorId==viewer) / ADMIN / abonat
+ACTIV** la tierId. Doar ultima condiție face apelul inter-service. Aceeași verificare gateză și
+comentariile pe postări premium.
+
+### Reziliență (Resilience4j) — fallback FAIL-CLOSED
+Apelul Content→Subscription e împachetat în **Spring Cloud CircuitBreaker (Resilience4j)** —
+`spring-cloud-starter-circuitbreaker-resilience4j`, API programatic `CircuitBreakerFactory.run(supplier,
+fallback)` în `SubscriptionAccessService`. Config (`ResilienceConfig`): sliding window 10, prag 50%,
+min 5 apeluri, open 10s, **timeout 3s** (+ Feign read-timeout 2.5s). **Fallback = `false` (fără acces
+→ post rămâne locked).** Alegere de securitate: *în dubiu, blochează*. Dacă Subscription e jos/lent,
+breaker-ul protejează Content (NU 500, NU cascadă). Validat: cu subscription oprit, GET post premium
+ca fan abonat → **200 + locked=true** (log: `Premium gating check unavailable (fail-closed -> locked)`).
+
+### Propagarea identității (decizie luată cu utilizatorul — Opțiunea 1)
+Gateway-ul e singura sursă de adevăr pt identitate. `IdentityPropagationFilter` (GlobalFilter):
+1. **șterge** orice `X-User-*` venit din exterior (anti-spoofing); 2. dacă există sesiune (`JSESSIONID`),
+apelează `user-service /api/auth/me` (WebClient `@LoadBalanced`) retransmițând cookie-ul; 3. injectează
+`X-User-Id`/`X-User-Roles` (prefix `ROLE_`)/`X-User-Name`. Fără sesiune → request anonim (endpoint-urile
+publice merg). Downstream (subscription/content) sunt **stateless** (CSRF off) cu `HeaderAuthenticationFilter`
+(header→`SecurityContext`) + `CurrentViewerService` din `common`; `@PreAuthorize`/regulile pe rol merg
+neschimbate. **Tranzitoriu pre-JWT:** la JWT gateway-ul va valida tokenul în loc de `/me`, injectând
+aceleași headere → downstream neschimbat. (Gateway-ul NU importă `common` — e reactiv, ar trage servlet;
+constantele de headere sunt duplicate local, ținute în sync cu `GatewayHeaders`.)
+
+### Gateway routing (adăugat)
+`/api/tiers/**`, `/api/subscriptions/**` → `lb://subscription-service`;
+`/api/posts/**`, `/api/comments/**`, `/api/tags/**` → `lb://content-service`
+(`/api/posts/{id}/comments` merge tot la content). user-service rămâne pe auth/creators/profiles/admin.
+Sub-resursele cross-service din monolit (`/api/creators/{id}/posts|tiers`) devin acum `GET /api/posts?creatorId=`
+(content) și `GET /api/tiers?creatorId=` (subscription).
+
+### Decizii de DTO (microservicii)
+Câmpurile de „display" cross-service au fost SCOASE din răspunsuri (nu mai sunt disponibile local, fără
+join cross-service): `creatorUsername`/`tierName` din `PostResponse`, `creatorUsername` din `TierResponse`,
+`fanUsername` din `SubscriptionResponse`, `authorUsername` din `CommentResponse`. Rămân ID-urile
+(`creatorId`, `tierId`, `authorId`, `fanId`). `SubscriptionResponse` păstrează `tierName`/`creatorId`
+(tier-ul e local). Display-ul prin call/denormalizare e amânat (eventual cu Redis).
+
+### Verificat (2026-06-23) — prin gateway 8085
+- Build reactor verde, **61 teste** (28 user + 14 subscription + 19 content, unit Mockito + integration H2).
+- Pornit eureka → user → subscription → content → gateway; toate UP în Eureka.
+- **Gating inter-service:** tier (creatorId=3, `subs_svc`) → post premium (`content_svc`, tier_id=1) →
+  fan (id 4) se abonează → GET post: fan abonat **body vizibil**, anonim/neabonat **locked**, autor+admin **vizibil**.
+- **Circuit breaker:** subscription-service oprit → GET post premium ca fan abonat → **200 + locked** (fail-closed), content UP.
+- **Anti-spoofing:** `POST /api/posts` cu `X-User-Id:3 ROLE_ADMIN` fals fără sesiune → **401**; `GET` post impersonând autorul → **locked** (header șters).
+- **Scheme separate:** `users_svc` (users, profile), `subs_svc` (subscription_tier, subscription), `content_svc` (post, comment, tag, post_tags).
+
+### Rămas (Pasul 4+)
+Notification Service (MongoDB, eveniment la abonare/postare). Apoi Config Server, monitoring
+(Prometheus/Grafana), Redis (cache pe gating/display), JWT distribuit, Docker Compose, deploy.
+Monolitul se curăță DOAR la final.
