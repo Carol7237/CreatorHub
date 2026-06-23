@@ -1,0 +1,41 @@
+# Prometheus scrape config for the CreatorHub stack. Targets are the Docker compose
+# SERVICE names + their internal ports + Spring Boot Actuator's /actuator/prometheus.
+# Prometheus runs on the same compose network, so it resolves the service names.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'eureka-server'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['eureka-server:8761']
+
+  - job_name: 'api-gateway'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['api-gateway:8085']
+
+  - job_name: 'user-service'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['user-service:8092']
+
+  - job_name: 'subscription-service'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['subscription-service:8093']
+
+  - job_name: 'content-service'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['content-service:8094']
+
+  - job_name: 'notification-service'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['notification-service:8095']

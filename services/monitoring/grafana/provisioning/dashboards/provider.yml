@@ -1,0 +1,14 @@
+# Auto-load any dashboard JSON found under /var/lib/grafana/dashboards on startup.
+apiVersion: 1
+
+providers:
+  - name: 'CreatorHub'
+    orgId: 1
+    folder: 'CreatorHub'
+    type: file
+    disableDeletion: false
+    editable: true
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
