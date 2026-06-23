@@ -1,0 +1,40 @@
+# Base / common configuration for the Content Service.
+spring:
+  application:
+    name: content-service
+
+  profiles:
+    active: dev
+
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+        one-indexed-parameters: false
+
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            # Keep below the circuit-breaker time limit (3s) so a slow Subscription
+            # service trips the breaker / fallback instead of hanging the request.
+            connect-timeout: 2000
+            read-timeout: 2500
+
+server:
+  port: 8094   # 8092 user / 8093 subscription / 8085 gateway / 8761 eureka are taken.
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
