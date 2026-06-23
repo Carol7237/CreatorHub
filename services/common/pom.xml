@@ -44,6 +44,16 @@
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-core</artifactId>
         </dependency>
+        <!-- AuthenticationEntryPoint / AccessDeniedHandler for the shared JSON 401/403 handlers. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-web</artifactId>
+        </dependency>
+        <!-- ObjectMapper, used by the JSON error handlers. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <!-- Pageable/Page/Sort for PagedResponse + PageableUtils. -->
         <dependency>
             <groupId>org.springframework.data</groupId>
