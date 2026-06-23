@@ -55,6 +55,8 @@ public class SecurityConfig {
                                 "/v3/api-docs/**", "/v3/api-docs.yaml", "/error").permitAll()
                         // Public reads: browse posts (gated bodies handled in the service), comments, tags.
                         .requestMatchers(HttpMethod.GET, "/api/posts/**", "/api/tags/**").permitAll()
+                        // Public load-balancing demo endpoint (reports the serving instance).
+                        .requestMatchers(HttpMethod.GET, "/api/content/**").permitAll()
                         // Everything else under /api requires an authenticated identity.
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())

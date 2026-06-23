@@ -21,10 +21,11 @@ spring:
               predicates:
                 - Path=/api/tiers/**,/api/subscriptions/**
             # Content bounded context: posts (incl. /{id}/comments), comments, tags.
+            # /api/content/** is the load-balancing demo endpoint (instance identity).
             - id: content-service
               uri: lb://content-service
               predicates:
-                - Path=/api/posts/**,/api/comments/**,/api/tags/**
+                - Path=/api/posts/**,/api/comments/**,/api/tags/**,/api/content/**
             # Notifications bounded context (the /internal/** create endpoint is NOT routed).
             - id: notification-service
               uri: lb://notification-service
