@@ -32,6 +32,20 @@ services:
       timeout: 5s
       retries: 10
 
+  mongodb:
+    image: mongo:7
+    container_name: creatorhub-mongo
+    restart: unless-stopped
+    ports:
+      - "27018:27017"          # host 27018 (a native mongod may hold 27017); services use mongodb:27017
+    volumes:
+      - creatorhub-stack-mongodata:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep -q 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   eureka-server:
     build:
       context: .
@@ -128,6 +142,30 @@ services:
       retries: 12
       start_period: 60s
 
+  notification-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: notification-service
+    image: creatorhub/notification-service:0.0.1
+    container_name: creatorhub-notification
+    restart: unless-stopped
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://mongodb:27017/notifications_db
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8095/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
   api-gateway:
     build:
       context: .
@@ -153,3 +191,4 @@ services:
 
 volumes:
   creatorhub-stack-pgdata:
+  creatorhub-stack-mongodata:

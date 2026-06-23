@@ -1,7 +1,12 @@
-# CreatorHub — local development infrastructure.
-# Phase 0: a single PostgreSQL 16 instance with a persistent volume.
+# CreatorHub — local development infrastructure (databases only).
+# PostgreSQL 16 (monolith + microservices) and MongoDB 7 (notification-service),
+# each with a persistent volume. Run a service LOCALLY (profile dev) against these.
 # Start with:  docker compose up -d
-# Stop with:   docker compose down        (add -v to also drop the data volume)
+# Stop with:   docker compose down        (add -v to also drop the data volumes)
+#
+# NOTE: for the FULL microservices stack in Docker use services/docker-compose.yml
+# instead (it ships its own postgres + mongodb on the same host ports — don't run
+# both at once).
 
 services:
   postgres:
@@ -24,5 +29,22 @@ services:
       timeout: 5s
       retries: 5
 
+  # MongoDB for the notification-service (NoSQL). Used when running that service
+  # locally on the dev profile (mongodb://localhost:27017/notifications_db).
+  mongodb:
+    image: mongo:7
+    container_name: creatorhub-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - creatorhub-mongodata:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep -q 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   creatorhub-pgdata:
+  creatorhub-mongodata:
