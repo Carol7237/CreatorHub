@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: eureka-server
+
+server:
+  port: 8761
+
+# Standalone registry: this server is the registry itself, so it neither registers
+# with another Eureka nor fetches a registry from anyone else.
+eureka:
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  server:
+    # Disable self-preservation in development so de-registered (stopped) services
+    # disappear from the dashboard promptly instead of being kept "just in case".
+    enable-self-preservation: false
