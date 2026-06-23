@@ -47,6 +47,12 @@
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
         </dependency>
 
+        <!-- Actuator: /actuator/health for the Docker Compose healthcheck (and future metrics). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
         <!-- Declarative inter-service HTTP client (load-balanced via Eureka). -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>
