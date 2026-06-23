@@ -2,6 +2,8 @@ package com.creatorhub.contentservice.service.impl;
 
 import com.creatorhub.common.Viewer;
 import com.creatorhub.common.exception.ResourceNotFoundException;
+import com.creatorhub.contentservice.client.NotificationPublisher;
+import com.creatorhub.contentservice.client.NotifyRequest;
 import com.creatorhub.contentservice.client.SubscriptionAccessService;
 import com.creatorhub.contentservice.dto.CommentRequest;
 import com.creatorhub.contentservice.dto.CommentResponse;
@@ -28,6 +30,7 @@ public class CommentServiceImpl implements CommentService {
     private final CommentRepository commentRepository;
     private final PostRepository postRepository;
     private final SubscriptionAccessService subscriptionAccessService;
+    private final NotificationPublisher notificationPublisher;
 
     @Override
     public CommentResponse create(CommentRequest request, Viewer viewer) {
@@ -47,6 +50,14 @@ public class CommentServiceImpl implements CommentService {
 
         Comment saved = commentRepository.save(comment);
         log.info("Comment created: id={} post={} author={}", saved.getId(), post.getId(), saved.getAuthorId());
+
+        // Best-effort notification to the post's author (skip self-comments; fail-open).
+        if (!viewer.userId().equals(post.getAuthorId())) {
+            notificationPublisher.publish(new NotifyRequest(
+                    post.getAuthorId(), "NEW_COMMENT",
+                    "New comment on your post", viewer.userId(), post.getId()));
+        }
+
         return CommentMapper.toResponse(saved);
     }
 

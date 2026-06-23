@@ -2,6 +2,7 @@ package com.creatorhub.contentservice.service.impl;
 
 import com.creatorhub.common.Viewer;
 import com.creatorhub.common.exception.ResourceNotFoundException;
+import com.creatorhub.contentservice.client.NotificationPublisher;
 import com.creatorhub.contentservice.client.SubscriptionAccessService;
 import com.creatorhub.contentservice.dto.CommentRequest;
 import com.creatorhub.contentservice.dto.CommentResponse;
@@ -31,6 +32,7 @@ class CommentServiceImplTest {
     @Mock private CommentRepository commentRepository;
     @Mock private PostRepository postRepository;
     @Mock private SubscriptionAccessService subscriptionAccessService;
+    @Mock private NotificationPublisher notificationPublisher;
 
     @InjectMocks private CommentServiceImpl commentService;
 

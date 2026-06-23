@@ -9,6 +9,7 @@ import com.creatorhub.subscriptionservice.dto.SubscriptionResponse;
 import com.creatorhub.subscriptionservice.model.Subscription;
 import com.creatorhub.subscriptionservice.model.SubscriptionTier;
 import com.creatorhub.subscriptionservice.model.enums.SubStatus;
+import com.creatorhub.subscriptionservice.client.NotificationPublisher;
 import com.creatorhub.subscriptionservice.repository.SubscriptionRepository;
 import com.creatorhub.subscriptionservice.repository.SubscriptionTierRepository;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,7 @@ class SubscriptionServiceImplTest {
 
     @Mock private SubscriptionRepository subscriptionRepository;
     @Mock private SubscriptionTierRepository tierRepository;
+    @Mock private NotificationPublisher notificationPublisher;
     @InjectMocks private SubscriptionServiceImpl subscriptionService;
 
     private static SubscriptionTier tier(Long id, Long creatorId) {

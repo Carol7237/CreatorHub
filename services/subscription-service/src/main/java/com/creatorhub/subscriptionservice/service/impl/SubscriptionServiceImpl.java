@@ -4,6 +4,8 @@ import com.creatorhub.common.Viewer;
 import com.creatorhub.common.exception.BusinessRuleException;
 import com.creatorhub.common.exception.DuplicateResourceException;
 import com.creatorhub.common.exception.ResourceNotFoundException;
+import com.creatorhub.subscriptionservice.client.NotificationPublisher;
+import com.creatorhub.subscriptionservice.client.NotifyRequest;
 import com.creatorhub.subscriptionservice.dto.SubscriptionRequest;
 import com.creatorhub.subscriptionservice.dto.SubscriptionResponse;
 import com.creatorhub.subscriptionservice.dto.mapper.SubscriptionMapper;
@@ -30,6 +32,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
     private final SubscriptionRepository subscriptionRepository;
     private final SubscriptionTierRepository tierRepository;
+    private final NotificationPublisher notificationPublisher;
 
     @Override
     public SubscriptionResponse create(SubscriptionRequest request, Viewer viewer) {
@@ -58,6 +61,13 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
         Subscription saved = subscriptionRepository.save(subscription);
         log.info("Subscription activated: id={} fan={} tier={}", saved.getId(), fanId, tier.getId());
+
+        // Best-effort notification to the creator (fail-open: never blocks the subscription).
+        notificationPublisher.publish(new NotifyRequest(
+                tier.getCreatorId(), "NEW_SUBSCRIBER",
+                "You have a new subscriber on tier '" + tier.getName() + "'",
+                fanId, tier.getId()));
+
         return SubscriptionMapper.toResponse(saved);
     }
 
