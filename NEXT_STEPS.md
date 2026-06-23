@@ -230,6 +230,15 @@ Commit-uri mici: `feat(eureka): ...`, `feat(gateway): ...`, `feat(probe): ...`.
    > - **Verificat:** toate target-urile UP; metrici reale din trafic (request rate, p95, JVM);
    >   **circuit breaker** `resilience4j_circuitbreaker_state` closed→**open** când subscription
    >   e oprit (postul tot servit 200). Acoperă pasul 5 (Monitoring) de mai jos.
+
+   > ### ✅ LOAD BALANCING & SCALABILITATE — DEMONSTRAT (2026-06-24)
+   > Cerința de load balancing (client-side LB cu Spring Cloud LoadBalancer) era implementată;
+   > acum **demonstrată cu 2 instanțe**. Detalii + pași de reproducere: **CLAUDE.md §22**. Pe scurt:
+   > - `content-service` scalat la 2 (`docker compose ... up -d --scale content-service=2`); fără
+   >   `container_name` fix și fără port pe host → scale-ul merge. Ambele UP în Eureka (`CONTENT-SERVICE`).
+   > - Endpoint demo `GET /api/content/instance` (instanceId per instanță). **12 cereri prin gateway →
+   >   50/50 round-robin** între cele 2 instanțe. Bonus reziliență: o instanță oprită → cealaltă servește
+   >   (7/8 OK, 1 tranzitoriu la evicție). Bifează cerința de Load Balancing (5%).
 3. **Config Server** (`spring-cloud-config-server`) — externalizează `application.yml`-urile
    (porturi, datasource, secrete) într-un repo de config (Git sau `native`).
 4. **Resilience4j** pe apelurile cross-service (mai ales gating-ul premium): circuit

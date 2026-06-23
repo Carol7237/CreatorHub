@@ -84,6 +84,30 @@ auto-provisioned data source and dashboard.
   breaker state. Stop `subscription-service` and hit a premium post to watch the
   `subscriptionAccess` breaker flip from closed to open in real time.
 
+### Load balancing (scale a service)
+
+Client-side load balancing (Spring Cloud LoadBalancer over Eureka) is built in. To
+demonstrate it, run a service with two instances and watch the gateway round-robin
+between them:
+
+```bash
+docker stop creatorhub-postgres
+docker compose -f services/docker-compose.yml up -d --scale content-service=2 --build
+```
+
+Both instances register in Eureka under `CONTENT-SERVICE` (check
+`http://localhost:8761`). Each replica reports its identity at
+`GET /api/content/instance`. Hit it a few times through the gateway and the
+`instanceId` alternates between the two — proof of round-robin distribution:
+
+```bash
+# PowerShell: 1..12 | %{ curl.exe -s http://localhost:8085/api/content/instance }
+```
+
+(`content-service` has no fixed `container_name` and no host port, which is what
+lets Docker Compose scale it. Stopping one instance leaves the other serving — the
+service stays available.)
+
 ## Frontend (React SPA)
 
 A separate React + TypeScript + Vite app lives in [`frontend/`](frontend). It is

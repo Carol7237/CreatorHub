@@ -1040,3 +1040,46 @@ Spring Cloud CircuitBreaker ↔ Micrometer; breaker-ele se creează lazy la prim
 
 ### Rămas (Pasul 7+)
 Config Server, Redis (cache pe gating/display), JWT distribuit, containerizare frontend, deploy.
+
+## 22. Load Balancing & Scalabilitate — DEMONSTRAT (cerință opțională)
+
+> Ramura `microservices`. Mecanismul (Spring Cloud LoadBalancer prin Eureka `lb://`) exista deja;
+> aici **demonstrăm** rularea cu 2 instanțe și distribuția traficului. Reproductibil la prezentarea live.
+
+### Cum se identifică instanța care răspunde
+`content-service` expune un endpoint public de demo: **`GET /api/content/instance`**
+(`InstanceController`) → `{service, instanceId, host, port}`. `instanceId` = UUID scurt generat o
+singură dată la pornirea JVM-ului (deci diferă per instanță); `host` = hostname-ul containerului.
+Rutat prin gateway (`/api/content/**` → `lb://content-service`), permis public în securitatea content.
+
+### Abordarea: Docker Compose `--scale` (ABORDARE A)
+`content-service` în compose **NU are `container_name` fix și NU mapează port pe host** → poate fi scalat.
+Fiecare replică e auto-numită (`services-content-service-1/-2`), rulează intern pe 8094 (namespace de
+rețea propriu), se înregistrează în Eureka cu IP de container diferit. *Tensiune întâlnită & rezolvată:*
+inițial `container_name: creatorhub-content` bloca scale-ul (Docker nu poate 2 containere cu același nume)
+→ l-am scos. (Un `creatorhub-mongo` orfan de la o rulare anterioară a dat conflict → `docker compose down`
++ pornire curată.) Portul pe host ar fi blocat și el scale-ul, dar serviciile de business sunt deja interne.
+
+### PAȘI DE REPRODUCERE (pentru demo live)
+```bash
+docker stop creatorhub-postgres          # eliberează 5433 pt stiva proprie
+docker compose -f services/docker-compose.yml up -d --scale content-service=2 --build
+# verifică 2 instanțe în Eureka:
+curl http://localhost:8761/eureka/apps/CONTENT-SERVICE   # 2x <instance> UP, IP-uri diferite, port 8094
+# DOVADA load balancing — răspund instanțe diferite (round-robin):
+for /l %i in (1,1,12) do curl -s http://localhost:8085/api/content/instance   # Windows cmd
+#   sau în PowerShell: 1..12 | %{ curl.exe -s http://localhost:8085/api/content/instance }
+```
+(Notă: gateway-ul are nevoie de ~30s să-și împrospăteze registry-ul după pornire — primele cereri pot da
+503 până vede ambele instanțe; apoi 200 + round-robin.)
+
+### Distribuția observată (validat 2026-06-24)
+- Eureka: **CONTENT-SERVICE × 2 UP** (`...:content-service:8094`, IP-uri `172.19.0.8` și `172.19.0.10`).
+- **12 cereri prin gateway → exact 50/50**: `instanceId=97e4ccbb` (6×, cererile impare) /
+  `e0f6596e` (6×, cererile pare) — **round-robin perfect**, 2 instanțe distincte.
+- **Reziliență (bonus):** oprit o instanță (`docker stop services-content-service-1`) → **7/8 cereri OK**
+  pe instanța rămasă (1 eșec tranzitoriu în fereastra de evicție Eureka) → serviciul rămâne disponibil,
+  fără outage total. Repornit cu `docker start services-content-service-1`.
+
+### Curățare
+`docker compose -f services/docker-compose.yml down` + `docker start creatorhub-postgres` (revine la dev local).
