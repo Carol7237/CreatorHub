@@ -1,0 +1,4 @@
+# Keep the Docker build context small: don't ship build output or local run logs.
+**/target
+.run-logs
+**/*.log

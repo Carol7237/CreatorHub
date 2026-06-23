@@ -1,0 +1,155 @@
+# CreatorHub — full microservices stack (Phase 8 Step 4).
+# One command brings up the whole backend:  docker compose -f services/docker-compose.yml up --build
+#
+# Start order is enforced by healthchecks:
+#   postgres (healthy) -> eureka-server (healthy) -> business services + gateway
+#
+# Docker addressing: services reach each other by SERVICE NAME on the compose
+# network (postgres:5432, eureka-server:8761) — NOT localhost. These addresses are
+# injected here as environment variables that OVERRIDE the dev-profile defaults
+# (localhost), so local non-Docker development (profile dev, localhost:5433) keeps
+# working unchanged.
+#
+# NOTE: this stack's postgres also uses host port 5433 — stop the standalone
+# monolith DB (root docker-compose.yml: creatorhub-postgres) before starting this.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: creatorhub-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: creatorhub
+      POSTGRES_PASSWORD: creatorhub
+      POSTGRES_DB: creatorhub
+    ports:
+      - "5433:5432"            # host:container — external inspection only; services use postgres:5432
+    volumes:
+      - creatorhub-stack-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creatorhub -d creatorhub"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  eureka-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: eureka-server
+    image: creatorhub/eureka-server:0.0.1
+    container_name: creatorhub-eureka
+    restart: unless-stopped
+    ports:
+      - "8761:8761"            # Eureka dashboard on the host
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8761/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  user-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: user-service
+    image: creatorhub/user-service:0.0.1
+    container_name: creatorhub-user
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/creatorhub
+      SPRING_DATASOURCE_USERNAME: creatorhub
+      SPRING_DATASOURCE_PASSWORD: creatorhub
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8092/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  subscription-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: subscription-service
+    image: creatorhub/subscription-service:0.0.1
+    container_name: creatorhub-subscription
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/creatorhub
+      SPRING_DATASOURCE_USERNAME: creatorhub
+      SPRING_DATASOURCE_PASSWORD: creatorhub
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8093/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  content-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: content-service
+    image: creatorhub/content-service:0.0.1
+    container_name: creatorhub-content
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/creatorhub
+      SPRING_DATASOURCE_USERNAME: creatorhub
+      SPRING_DATASOURCE_PASSWORD: creatorhub
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8094/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: api-gateway
+    image: creatorhub/api-gateway:0.0.1
+    container_name: creatorhub-gateway
+    restart: unless-stopped
+    ports:
+      - "8085:8085"            # single entry point on the host
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8085/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+volumes:
+  creatorhub-stack-pgdata:
