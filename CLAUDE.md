@@ -14,10 +14,23 @@ notificări.
 Proiect de facultate (Aplicații Web cu Arhitectură de Microservicii), construit
 la **calitate de producție** fiindcă va deveni un produs real.
 
-**Strategie: monolit întâi, microservicii la final.** Construim mai întâi un
-monolit Spring Boot curat și bine structurat; abia în fazele finale îl spargem
-în microservicii. **NU adăuga nimic legat de microservicii / Spring Cloud /
-Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.**
+**Strategie: monolit întâi, microservicii la final.** Am construit mai întâi un
+monolit Spring Boot curat și bine structurat; acum urmează spargerea în
+microservicii.
+
+> ## ⭐ STARE CURENTĂ (handoff — citește asta primul)
+> **Monolitul Spring Boot e COMPLET și funcțional pe ramura `main`**, working tree
+> curat. Toate cele **8 cerințe obligatorii** sunt livrate (model JPA, CRUD+service
+> layer, multi-environment, Spring Security, paginare/sortare+logging, testare,
+> REST API+validare, frontend React) — **~60% din notă livrat**. **105 teste verzi**
+> pe H2 (`./mvnw clean verify`), coverage service **87% line**. Frontend React (SPA
+> cyberpunk) în `/frontend`, verificat end-to-end.
+>
+> **Următorul pas = Faza 8: microservicii (Spring Cloud), țintă notă 8–9.** Planul
+> complet, incremental, e în **[`NEXT_STEPS.md`](NEXT_STEPS.md)** — citește-l înainte
+> să începi. Microserviciile se construiesc pe o **ramură nouă `microservices`**
+> (NU pe `main`); monolitul de pe `main` rămâne intact ca backup. **Nu sparge
+> monolitul de pe `main`.**
 
 ## 2. Stack tehnologic
 
@@ -30,22 +43,30 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
 - Frontend: React
 - Build: Maven; rulare în Docker
 
-### Implementat până acum (faza curentă — monolit)
+### Implementat (monolitul — COMPLET, pe `main`)
 - Java 21 (Temurin 21.0.11)
 - Spring Boot **3.5.15** (parent), Maven prin **Maven Wrapper** (`./mvnw`)
-- Dependențe: Spring Web, Spring Data JPA, Validation, PostgreSQL Driver,
-  Lombok, DevTools, spring-boot-starter-test (test scope)
-- PostgreSQL **16** în Docker (`docker-compose.yml`) — pe host portul **5433**
-  (mapat la 5432 din container), HTTP pe **8081** (vezi §7 pentru de ce)
+- Dependențe: Spring Web, Spring Data JPA, Validation, **Security**, **AOP**,
+  PostgreSQL Driver, Lombok, DevTools, springdoc-openapi (Swagger), H2 +
+  spring-security-test (test), JaCoCo + spring-boot-starter-test.
 - Model de date: 7 entități JPA + 2 enum-uri (vezi §8)
-- Backend: repository + DTO + mapper + service layer + excepții (vezi §9). Fără
-  controllere încă (Faza Views).
-- Profiluri Spring: `dev` (PostgreSQL/Docker) și `test` (H2 in-memory) — vezi §10.
-- Securitate: Spring Security (sesiune, BCrypt, CSRF, roluri) — vezi §11.
-- Paginare/sortare (`PagedResponse`) + logging (Logback, AOP) — vezi §12.
-- Testare: JaCoCo + unit (Mockito) + integration (H2); 105 teste — vezi §13/§14.
-- REST API + validare + erori + CORS + Swagger (springdoc) — vezi §14.
+- Backend: repository + DTO + mapper + service layer + excepții (§9), profiluri
+  dev/test (§10), Spring Security sesiune+CSRF+roluri (§11), paginare/sortare +
+  logging+AOP (§12), testare JaCoCo (§13), REST controllers + validare + erori +
+  CORS + Swagger (§14).
+- **Frontend React** (SPA cyberpunk) în `/frontend` — React 18 + TS + Vite, vezi §15.
 - Build tool: Maven (NU Gradle)
+
+### Porturi & credențiale dev (importante)
+- **PostgreSQL**: Docker, host **5433** (intern 5432). DB/user/pass = `creatorhub`.
+- **Backend** (Spring): **8081** (profil `dev`). Swagger: `/swagger-ui.html`.
+- **Frontend** (Vite dev): **5173** (proxy `/api` → `:8081`).
+- **Admin dev** (seed doar pe `dev`): username **`admin`** / parolă **`admin123`**.
+- Porneste: `docker compose up -d` → `./mvnw spring-boot:run` → `cd frontend && npm run dev`.
+
+### Țintă finală microservicii (planul detaliat în NEXT_STEPS.md)
+Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
+(cache), MongoDB (NoSQL); Prometheus + Grafana; JWT distribuit; Docker Compose.
 
 ## 3. Reguli de lucru (valabile pentru tot proiectul)
 
@@ -60,6 +81,32 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
    (controller → service → repository), cod curat, fără shortcut-uri urâte.
 5. **ACTUALIZEAZĂ ACEST FIȘIER.** Când termini o fază sau iei o decizie
    importantă, notează în secțiunea Progres (§5).
+6. **RAMURĂ SEPARATĂ PENTRU MICROSERVICII.** Lucrul la microservicii se face pe
+   ramura `microservices`; `main` (monolitul complet) rămâne intact ca backup. NU
+   sparge monolitul de pe `main` fără motiv explicit.
+7. **NU STRICA CE E GATA.** Monolitul + frontend-ul sunt funcționale (105 teste
+   verzi). Nu rescrie/șterge cod care merge decât dacă e necesar pentru pasul curent.
+
+## 3bis. Lecții de tooling (mediul de dev — economisesc timp)
+
+> Mediu: **Windows 10**, shell primar **PowerShell 5.1** (+ Bash tool pentru POSIX).
+> Maven NU e instalat global → folosește `./mvnw` (Windows: `mvnw.cmd`). `JAVA_HOME`
+> uneori trebuie setat: `$env:JAVA_HOME = Split-Path (Split-Path (Get-Command java).Source -Parent) -Parent`.
+
+- **Commit-uri:** `git commit -m` cu ghilimele duble / `<...>` (din `Co-Authored-By`)
+  / heredoc-uri **se rupe** în PowerShell 5.1. Scrie mesajul într-un fișier temp și
+  `git commit -F <fișier>`.
+- **`Remove-Item`** e adesea blocat de sandbox (fals pozitiv, ex. pe `-split "\s+"`).
+  Pentru ștergeri folosește **Bash tool** (`rm -rf`), nu PowerShell.
+- **Verificări HTTP:** folosește **`curl.exe`**, NU `Invoke-WebRequest` (IWR cu body
+  gol a raportat fals 200 în loc de 403 — aproape a ascuns o falsă gaură CSRF).
+  JSON pentru curl: scrie-l într-un fișier și `curl.exe --data-binary @file` (evită
+  problemele de quoting). CSRF în curl: `GET /api/auth/csrf` cu cookie jar, citește
+  cookie-ul `XSRF-TOKEN`, trimite-l în header `X-XSRF-TOKEN` (tokenul rotește după login).
+- **Run app fără a bloca shell-ul:** `Start-Process java -jar ...jar` (sau `mvnw spring-boot:run`)
+  în fundal cu redirect la log, apoi poll pe `Started CreatorHubApplication`.
+- **Preview UI:** `.claude/launch.json` + tool-ul de preview pe portul 5173 (oprește
+  întâi Vite-ul pornit manual ca să elibereze portul).
 
 ## 4. Convenții de cod
 
@@ -129,8 +176,10 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   Motion), CRUD complet prin UI, gating premium vizual, validare client-side,
   CSRF prin Vite proxy (same-origin). 11 pagini. Verificat end-to-end (login,
   feed, gating, 404). Detalii §15. **TOT textul UI în engleză.**
-- [ ] **Faza 8 (următoarea) — Microservicii** (Spring Cloud: Eureka, Gateway,
-  Config, Resilience4j), apoi cache Redis, MongoDB, monitorizare (Prometheus/Grafana).
+- [ ] **Faza 8 (URMĂTOAREA) — Microservicii** (Spring Cloud: Eureka, Gateway,
+  Config, Resilience4j), apoi Redis, MongoDB, monitorizare (Prometheus/Grafana),
+  JWT distribuit. **PLANUL COMPLET ȘI PAȘII: vezi [`NEXT_STEPS.md`](NEXT_STEPS.md).**
+  Se lucrează pe ramura `microservices` (nu pe `main`).
 
 ## 6. Comenzi utile
 

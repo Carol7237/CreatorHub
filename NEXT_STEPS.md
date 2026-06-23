@@ -1,0 +1,183 @@
+# NEXT_STEPS.md — Planul pentru microservicii (Faza 8+)
+
+> **Citește întâi `CLAUDE.md`** (mai ales blocul „STARE CURENTĂ" din §1, porturile
+> din §2, lecțiile de tooling din §3bis, și fundația de securitate §11/§14). Acest
+> fișier descrie EXACT ce urmează după monolit. Monolitul e COMPLET pe `main`.
+
+---
+
+## 0. Obiectivul
+
+Transformăm monolitul Spring Boot (`/src`, complet, pe `main`) într-o arhitectură
+de **microservicii cu Spring Cloud**. Ținta de notă: **8–9** (cerințele obligatorii
+= ~60% sunt deja livrate de monolit). Cerințele OPȚIONALE vizate acum:
+
+- **Config Server** (configurare centralizată).
+- **Eureka** (service discovery / registry).
+- **API Gateway** (rutare unică, single entry point).
+- **Load balancing** (Spring Cloud LoadBalancer prin Eureka).
+- **Resilience4j** (circuit breaker, retry, fallback, timeout, bulkhead).
+- **Monitoring**: Prometheus + Grafana (via Micrometer / actuator).
+- **Securitate distribuită**: JWT PESTE fundația existentă (se refolosesc
+  `CustomUserDetailsService` + `PasswordEncoder`; vezi CLAUDE.md §11 „JWT mai târziu").
+- **NoSQL + caching**: Redis (cache) + MongoDB (ex. pentru serviciul de Notification).
+
+---
+
+## 1. Strategia: incremental, verificat la fiecare pas
+
+- **Ramură git nouă `microservices`** (creată de sesiunea nouă la începutul Pasului 1).
+  `main` (monolitul) rămâne INTACT ca backup și ca referință de logică.
+- **Construiește incremental**: validează infrastructura ÎNAINTE de a muta logica
+  reală. Nu muta tot deodată. Fiecare pas: cod → pornit → verificat → commit mic.
+- **Refolosește din monolit**: entitățile, DTO-urile, regulile de business, securitatea
+  există deja și sunt testate. Se copiază/mută în servicii, nu se rescriu de la zero.
+- **Întreabă la decizii mari** (regula 3 din CLAUDE.md), mai ales: organizarea repo
+  (vezi §6), granițele exacte între servicii, și strategia de date (vezi §3).
+
+---
+
+## 2. Arhitectura țintă (construită INCREMENTAL, nu toată odată)
+
+| Componentă | Port | Rol |
+|---|---|---|
+| **Eureka Server** | 8761 | service registry / discovery |
+| **Config Server** | 8888 | configurare centralizată (Git/native) |
+| **API Gateway** | **8080** | single entry point, rutare, (mai târziu) auth JWT |
+| **User Service** | 8081* | User, Profile, auth/security, admin |
+| **Content Service** | 8082 | Post, Comment, Tag (+ gating premium) |
+| **Subscription Service** | 8083 | SubscriptionTier, Subscription |
+| **Notification Service** | 8084 | notificări (NoSQL/MongoDB candidat) |
+
+\* Atenție la conflictul de port: monolitul folosește 8081. În microservicii,
+gateway-ul ia **8080** (e liber? în 7A am notat că Oracle TNS putea ocupa 8080 —
+**verifică `Get-NetTCPConnection -LocalPort 8080`** la început; dacă e ocupat,
+alege alt port pentru gateway și documentează). Serviciile interne pot fi pe
+porturi dinamice (`server.port=0`) + Eureka, ca să nu ne batem capul cu porturi.
+
+**Maparea monolit → servicii** (granițele de domeniu):
+- **User Service** ← `User`, `Profile`, `model.enums.Role`, securitatea (login, register,
+  `/api/auth/**`, `/api/creators/**`, `/api/profiles/**`, `/api/admin/**`).
+- **Content Service** ← `Post`, `Comment`, `Tag` (`/api/posts/**`, `/api/comments/**`,
+  `/api/tags/**`). **Aici stă gating-ul premium** → are nevoie să afle dacă un viewer
+  are abonament activ (apel către Subscription Service, sau cache).
+- **Subscription Service** ← `SubscriptionTier`, `Subscription` (`/api/tiers/**`,
+  `/api/subscriptions/**`).
+- **Notification Service** ← NOU (domeniul zice „fanii primesc notificări"); bun
+  candidat pentru **MongoDB** + eveniment la abonare/postare nouă.
+
+---
+
+## 3. Decizia pe baze de date (ECHILIBRATĂ — important)
+
+Monolitul are **relații FK strânse** (`Post.author→User`, `Subscription.fan→User`,
+`Subscription.tier→Tier`, `Comment.author/post`, `Profile→User`). NU le sparge orbește
+în apeluri de rețea — ar fi lent și fragil.
+
+**Abordare recomandată (de confirmat cu utilizatorul):**
+- **Schema-per-service în ACELAȘI PostgreSQL** (sau database-per-service unde e curat).
+  Fiecare serviciu deține tabelele lui; granițele logice sunt clare, dar evităm
+  complexitatea operațională a N baze fizice.
+- **Referințe cross-service prin ID** (nu FK fizic cross-schema): ex. Content ține
+  `author_id` (Long) ca referință la User Service, fără FK la nivel de DB. Datele
+  „de afișare" (username, displayName) se iau prin apel către User Service (cu cache)
+  SAU se denormalizează minimal.
+- **Gating premium** (cazul cel mai delicat): Content Service trebuie să știe dacă
+  viewer-ul are abonament activ la tier-ul postării → apel către Subscription Service
+  (`existsActive(fanId, tierId)`), idealMENTE cu **Redis cache** pe răspuns + circuit
+  breaker (Resilience4j) + fallback (dacă Subscription Service e jos → tratează ca „fără
+  acces", nu crăpa).
+- **MongoDB** pentru Notification Service (date de tip event/feed, nu relaționale).
+
+> Decizia finală de date se ia la începutul mutării logicii (după ce infra merge).
+> Pentru PASUL 1 (infra) NU atingem baze de date reale.
+
+---
+
+## 4. PASUL 1 (primul lucru de făcut în sesiunea nouă) — DOAR infrastructura
+
+**Scop:** validăm că **discovery (Eureka) + routing (Gateway)** funcționează, ÎNAINTE
+de a muta orice logică reală. Fără DB, fără business.
+
+1. Creează ramura: `git checkout -b microservices`.
+2. **Decide organizarea repo cu utilizatorul** (vezi §6) — blocant pentru structură.
+3. **Eureka Server** (`spring-cloud-starter-netflix-eureka-server`), `@EnableEurekaServer`,
+   port **8761**, `application.yml` (nu se înregistrează pe el însuși).
+4. **API Gateway** (`spring-cloud-starter-gateway`), port **8080**, înregistrat în Eureka,
+   cu o rută către serviciul de probă (`lb://probe-service`).
+5. **Probe Service** minimal (`spring-boot-starter-web` + eureka client), un singur
+   endpoint `GET /api/probe/hello` → `"hello from probe"`, înregistrat în Eureka.
+6. **Spring Cloud BOM**: aliniază versiunea Spring Cloud cu Spring Boot **3.5.x**
+   (ex. Spring Cloud **2024.0.x** / „Moorgate" — verifică compatibilitatea în Maven
+   Central la momentul respectiv, exact ca la springdoc în 7A).
+
+**TESTUL-CHEIE de validare (Pasul 1 e gata când):**
+```
+GET http://localhost:8080/api/probe/hello
+→ rutează prin Gateway → rezolvă prin Eureka → ajunge la Probe Service → 200 "hello from probe"
+```
+Plus: Eureka dashboard la `http://localhost:8761` arată `GATEWAY` și `PROBE-SERVICE` UP.
+
+Commit-uri mici: `feat(eureka): ...`, `feat(gateway): ...`, `feat(probe): ...`.
+
+---
+
+## 5. Pașii următori (schiță — după ce infra din Pasul 1 e validată)
+
+2. **Mută logica de business în servicii, PE RÂND** (nu tot odată). Sugerat:
+   întâi **User Service** (cel mai independent), apoi **Subscription**, apoi
+   **Content** (depinde de ambele pentru gating). Fiecare: mută entități/DTO/service/
+   controller din monolit, conectează la DB (vezi §3), înregistrează în Eureka,
+   rutează prin Gateway, verifică, commit.
+3. **Config Server** (`spring-cloud-config-server`) — externalizează `application.yml`-urile
+   (porturi, datasource, secrete) într-un repo de config (Git sau `native`).
+4. **Resilience4j** pe apelurile cross-service (mai ales gating-ul premium): circuit
+   breaker + retry + timeout + **fallback** (degradare grațioasă). Demonstrează cu un
+   serviciu oprit → fallback, nu crash.
+5. **Monitoring**: actuator + Micrometer + Prometheus (scrape `/actuator/prometheus`)
+   + Grafana (dashboard-uri). Docker pentru Prometheus + Grafana.
+6. **Redis** (cache) — pe gating premium / date de user „de afișare" / liste.
+7. **MongoDB** — Notification Service (eveniment la abonare/postare nouă).
+8. **JWT distribuit** — login-ul (User Service) emite JWT; Gateway/servicii validează
+   JWT (filtru) în loc de sesiune. **Se refolosesc** `CustomUserDetailsService` +
+   `PasswordEncoder` (CLAUDE.md §11). Sesiune → `STATELESS`. Frontend-ul trimite
+   `Authorization: Bearer <jwt>` (adaptează interceptorul axios din `/frontend`).
+9. **Docker Compose pentru TOT** (Eureka, Config, Gateway, servicii, Postgres, Redis,
+   Mongo, Prometheus, Grafana) — un singur `docker compose up`.
+10. **Deployment** (opțional, dacă ajungem).
+
+La fiecare pas: actualizează `CLAUDE.md` §5 (progres) și acest fișier dacă planul
+se schimbă.
+
+---
+
+## 6. ÎNTREBARE DESCHISĂ — de rezolvat cu utilizatorul în PASUL 1
+
+**Organizarea repo-ului pentru microservicii.** Două opțiuni; alege CU utilizatorul:
+
+- **(A) Multi-module Maven** cu un `pom.xml` parent + module (`eureka-server/`,
+  `gateway/`, `user-service/`, ...). Pro: build unificat, versiuni partajate, dependency
+  management central. Contra: cuplare mai mare la build.
+- **(B) Proiecte Maven independente** sub `services/` (fiecare cu `pom.xml`-ul lui).
+  Pro: izolare reală, „cum sunt microserviciile în producție". Contra: build separat
+  pe fiecare, fără parent comun.
+
+Recomandare implicită: **(A) multi-module** pentru un proiect de facultate (mai ușor
+de build-uit/demonstrat), DAR întreabă utilizatorul — e o decizie structurală majoră.
+
+Alte întrebări de clarificat la nevoie: granițele exacte User↔Content↔Subscription;
+unde trăiește gating-ul premium; dacă păstrăm monolitul rulabil în paralel în timpul
+migrării.
+
+---
+
+## 7. Riscuri & note
+
+- **Versiuni Spring Cloud**: trebuie aliniate la Spring Boot 3.5.x — verifică în Maven
+  Central (Spring Cloud release train compatibil), nu ghici (lecția din 7A cu springdoc).
+- **Gating premium cross-service** = cea mai grea piesă (Content depinde de Subscription).
+  Proiecteaz-o cu cache + circuit breaker de la început.
+- **Frontend-ul** (`/frontend`) consumă acum `/api/**` prin proxy către `:8081`. La
+  microservicii, ținta proxy-ului devine **Gateway-ul (`:8080`)**; adaptează
+  `vite.config.ts` + (la JWT) interceptorul axios.
+- **Nu strica `main`.** Dacă microserviciile merg prost, monolitul rămâne livrabilul sigur.
