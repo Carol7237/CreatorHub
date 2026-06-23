@@ -149,6 +149,25 @@ Commit-uri mici: `feat(eureka): ...`, `feat(gateway): ...`, `feat(probe): ...`.
    **Content** (depinde de ambele pentru gating). Fiecare: mută entități/DTO/service/
    controller din monolit, conectează la DB (vezi §3), înregistrează în Eureka,
    rutează prin Gateway, verifică, commit.
+
+   > ### ✅ PASUL 2 — User Service COMPLET (2026-06-23)
+   > Primul serviciu real, migrat din monolit pe ramura `microservices` (monolitul
+   > NEATINS). Detalii complete: **CLAUDE.md §17**. Pe scurt:
+   > - **modul `services/common`** (tipuri partajate: excepții, `ApiErrorResponse`,
+   >   `PagedResponse`, `PageableUtils`, `Viewer`, `GlobalExceptionHandler`) — decizia
+   >   de cod partajat = **modul common**, nu duplicare.
+   > - **`services/user-service`** (port **8092**, schema **`users_svc`**): `User`
+   >   (decuplat de Post/Sub/Tier/Comment), `Profile`, auth complet (sesiune+BCrypt+
+   >   CSRF+roluri). Gateway: `/api/auth|creators|profiles|admin/**` → `lb://user-service`.
+   > - **§3 aplicat:** schema-per-service `users_svc`, fără FK cross-service.
+   > - **probe-service eliminat** (și-a făcut treaba în Pasul 1).
+   > - **Verificat:** 28 teste verzi; prin gateway register/login/me OK, admin 403(USER)/
+   >   200(ADMIN), parolă BCrypt în `users_svc`.
+   > - **RĂMAS de mutat:** Subscription (`tiers`, `subscriptions`), Content (`posts`,
+   >   `comments`, `tags` + gating premium cross-service), Notification (MongoDB).
+   >   Sugestie ordine: **Subscription** apoi **Content** (Content depinde de Subscription
+   >   pentru gating). Refolosește pattern-ul din user-service (modul + common + Eureka +
+   >   rută gateway + schema proprie). Monolitul se curăță DOAR la final.
 3. **Config Server** (`spring-cloud-config-server`) — externalizează `application.yml`-urile
    (porturi, datasource, secrete) într-un repo de config (Git sau `native`).
 4. **Resilience4j** pe apelurile cross-service (mai ales gating-ul premium): circuit

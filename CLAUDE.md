@@ -185,7 +185,13 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
     Eureka Server (8761), API Gateway (8085, reactiv), Probe Service (8091). Monolitul
     de pe `main` rămâne NEATINS. Test-cheie validat: `GET :8085/api/probe/hello`
     rutează prin Gateway → Eureka (`lb://probe-service`) → probe → **200**. Detalii §16.
-  - [ ] **Pasul 2+ — mutarea logicii** (User/Subscription/Content services), Config
+  - [x] **Pasul 2 — User Service (COMPLET, 2026-06-23):** primul serviciu de business
+    real. Modul `services/user-service` (port **8092**, schema **`users_svc`**) + modul
+    partajat `services/common`. Migrat din monolit: User (decuplat de Post/Sub/Tier/Comment)
+    + Profile + auth complet (sesiune+BCrypt+CSRF+roluri). **28 teste verzi.** Validat prin
+    gateway: register/login/me + admin 403(USER)/200(ADMIN), parolă BCrypt în `users_svc`.
+    probe-service eliminat. Detalii §17.
+  - [ ] **Pasul 3+ — restul serviciilor** (Subscription, Content, Notification), apoi Config
     Server, Resilience4j, monitoring, Redis, Mongo, JWT. Vezi `NEXT_STEPS.md` §5.
 
 ## 6. Comenzi utile
@@ -676,5 +682,67 @@ probe-service → api-gateway**. Build: `./mvnw -f services/pom.xml clean packag
 ### Note de tooling specifice
 - Build din rădăcină cu `-f services/pom.xml` (wrapper-ul monolitului e refolosit).
 - Rulare în fundal: `Start-Process java -jar ...` + poll pe `Started <App>` în log
-  (logurile de validare sunt în `services/.run-logs/`, ignorate de `*.log` din `.gitignore`).
+  (logurile de validare sunt în `services/.run-logs/`, ignorat de `.gitignore`).
 - Verificări HTTP: `curl.exe` (nu Invoke-WebRequest).
+
+## 17. Microservicii — User Service + modul common (Faza 8, Pasul 2)
+
+> Ramura `microservices`. Monolitul de pe `main` rămâne NEATINS (verificat: diff-ul
+> nu atinge `src/` sau `frontend/`). Primul serviciu de business real, migrat din monolit.
+
+### Modulul partajat `services/common`
+Jar-library (NU Spring Boot app) cu DOAR tipuri cross-service, fără logică de business:
+ierarhia de excepții, `ApiErrorResponse`, `PagedResponse`, `PageableUtils`, `Viewer`,
+`GlobalExceptionHandler` (`@RestControllerAdvice`). Pachete **distincte** `com.creatorhub.common.*`
+(`.exception`, `.dto`, `.web`) ca să evite split-package cu serviciile. Fiecare serviciu
+îl importă (`com.creatorhub:common`) și **component-scanează** handler-ul partajat. *Decizie
+(întrebarea deschisă din prompt): modul common, NU duplicare — mai curat, fără cod repetat.*
+
+### User Service (`services/user-service`, port 8092, schema `users_svc`)
+Bounded context de identitate. Migrat și **adaptat** din monolit (NU copiat orbește):
+- **Model:** `User` **decuplat** de `Post/Subscription/Tier/Comment` (acele entități trăiesc
+  în alte servicii, referite prin `id`, fără FK cross-service) + `Profile` (1:1, același
+  bounded context → relație JPA normală cu FK real în `users_svc`) + enum `Role`.
+- **Pachete:** `com.creatorhub.userservice.*` (model, repository, dto[.mapper], service[.impl],
+  security, controller, config). Main: `scanBasePackages="com.creatorhub"` (prinde handler-ul
+  din common); entity/repo scan rămâne pe pachetul serviciului.
+- **Securitate** (migrată identic în spirit): sesiune + BCrypt + CSRF cookie-based +
+  remember-me + autorizare pe rol + JSON 401/403. Refolosește `CustomUserDetailsService`
+  + `PasswordEncoder` (fundație gata pentru JWT, faza ulterioară). **NU s-a trecut la JWT.**
+- **Controllere:** `AuthController` (register/login/logout/me/csrf), `CreatorController`
+  (list + by-id; **sub-resursele `/{id}/posts` și `/{id}/tiers` scoase** — vin la Content/
+  Subscription), `ProfileController`, `AdminController`; `DevDataSeeder` (admin dev).
+- **Adaptare delete:** `UserServiceImpl.delete` NU mai verifică dependențe (tiers/posts/...)
+  — sunt cross-service acum; verificarea e **amânată** (apel inter-service/eveniment).
+- **Profiluri:** `dev` (PostgreSQL, schema `users_svc`, `ddl-auto=update`,
+  `hibernate.default_schema=users_svc` + `hbm2ddl.create_namespaces=true`), `test`
+  (H2, `eureka.client.enabled=false`).
+
+### Decizia de date §3 — APLICATĂ
+**Schema-per-service** în același PostgreSQL: User Service deține schema **`users_svc`**
+(tabelele `users` + `profile`). Fără FK cross-service (alte servicii vor referi userul prin
+`Long userId`). Hibernate creează schema (`create_namespaces`). Coexistă cu tabelele
+monolitului din schema `public` (același DB `creatorhub`), fără coliziune.
+
+### Gateway routing (adăugat)
+`/api/auth/**`, `/api/creators/**`, `/api/profiles/**`, `/api/admin/**` → `lb://user-service`.
+**CSRF + sesiune prin gateway:** gateway-ul relaitează transparent cookie-urile
+(`JSESSIONID`, `XSRF-TOKEN`) → fluxul CSRF merge end-to-end fără config extra (verificat).
+**CORS** rămâne pe serviciu deocamdată; integrarea frontend-ului prin gateway se reconfirmă
+la un pas ulterior (frontend-ul lovește încă monolitul pe 8081 — NEATINS în acest pas).
+
+### probe-service — ELIMINAT
+Și-a făcut treaba în Pasul 1 (validarea discovery+routing). Șters (modul + rută) ca să rămână curat.
+
+### Verificat (2026-06-23)
+- Build reactor verde, **28 teste** (12 user + 6 profile unit Mockito + 10 security integration H2).
+- Pornit eureka → user-service → gateway; ambele UP în Eureka (`USER-SERVICE`, `API-GATEWAY`).
+- **Prin gateway (8085):** `register` → 201 (parolă BCrypt, fără parolă în răspuns), `login`
+  → 200, `GET /api/auth/me` → 200, `GET /api/admin/users` ca USER → **403** / ca ADMIN → **200**.
+- DB: tabelele `users`/`profile` sunt în schema **`users_svc`**; `password` = hash BCrypt
+  (`$2a$10$...`, 60 ch), nu în clar.
+
+### Rămas de mutat (pașii următori)
+Subscription Service (`tiers`, `subscriptions`), Content Service (`posts`, `comments`, `tags`
++ gating premium cross-service), Notification Service (MongoDB). Apoi Config Server,
+Resilience4j, monitoring, Redis, JWT distribuit. Monolitul se curăță DOAR la final.
