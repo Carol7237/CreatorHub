@@ -37,6 +37,37 @@ the container's 5432; database `creatorhub`, user `creatorhub`, password
 Both ports avoid common dev-machine conflicts (a native PostgreSQL on 5432, an
 Oracle listener on 8080).
 
+## Microservices stack (Docker Compose)
+
+> The project is being split into Spring Cloud microservices on the `microservices`
+> branch (the monolith above stays intact on `main`). The whole **backend** stack runs
+> with one command. Full design in [CLAUDE.md](CLAUDE.md) §16–§19.
+
+Services: **Eureka** (discovery, `:8761`) · **API Gateway** (single entry point, `:8085`) ·
+**user-service** · **subscription-service** · **content-service** · **PostgreSQL**
+(each service owns its own schema: `users_svc`, `subs_svc`, `content_svc`). Premium
+gating is an inter-service call (Content → Subscription) protected by a Resilience4j
+circuit breaker; the gateway authenticates the session and forwards a trusted identity
+header to the stateless downstream services.
+
+```bash
+# Build + run the entire backend stack (one command):
+docker compose -f services/docker-compose.yml up --build      # add -d for background
+docker compose -f services/docker-compose.yml ps              # status + health
+docker compose -f services/docker-compose.yml down            # stop everything (-v drops the DB volume)
+```
+
+Everything is reached through the **gateway on `http://localhost:8085`** (e.g.
+`POST /api/auth/register`, `POST /api/auth/login`, `GET /api/posts`, `POST /api/tiers`).
+The Eureka dashboard is at `http://localhost:8761`. Start order is enforced by
+healthchecks (Postgres → Eureka → services → gateway).
+
+> The stack's PostgreSQL also uses host port `5433`, so stop the standalone monolith
+> database first (`docker stop creatorhub-postgres`). In Docker the addresses come from
+> environment variables in the compose file; running a service **locally** (without
+> Docker, profile `dev`) still uses `localhost:5433` / `localhost:8761` — the two modes
+> coexist. The React frontend is not containerized yet (run it separately, see below).
+
 ## Frontend (React SPA)
 
 A separate React + TypeScript + Vite app lives in [`frontend/`](frontend). It is

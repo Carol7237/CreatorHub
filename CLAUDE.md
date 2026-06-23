@@ -201,8 +201,16 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
     Validat prin gateway: tier→post premium→abonare, gating (fan abonat vede / neabonat
     locked / autor+admin văd), circuit breaker (subscription oprit → locked, nu 500),
     anti-spoofing (X-User-Id fals → ignorat). Detalii §18.
-  - [ ] **Pasul 4+ — Notification Service** (MongoDB), apoi Config Server, monitoring
-    (Prometheus/Grafana), Redis, JWT distribuit, Docker Compose, deploy. Vezi `NEXT_STEPS.md` §5.
+  - [x] **Pasul 4 — Docker Compose (toată stiva) (COMPLET, 2026-06-23):** un singur
+    `docker compose -f services/docker-compose.yml up --build` pornește PostgreSQL +
+    Eureka + user/subscription/content + Gateway, în ordine (healthchecks). Dockerfile
+    **unic parametrizat** multi-stage (ARG `MODULE`, build din contextul `services/` cu
+    `mvn -pl ${MODULE} -am` → rezolvă `common`). Adrese pentru Docker prin **env vars**
+    (suprascriu profilul `dev` → rularea locală neatinsă). Actuator adăugat pt healthcheck.
+    Validat: stivă healthy, gating inter-service prin gateway Docker, scheme separate în
+    containerul DB, rularea locală (dev/localhost:5433) încă merge. Detalii §19.
+  - [ ] **Pasul 5+ — Notification Service** (MongoDB), apoi Config Server, monitoring
+    (Prometheus/Grafana), Redis, JWT distribuit, deploy. Vezi `NEXT_STEPS.md` §5.
 
 ## 6. Comenzi utile
 
@@ -833,3 +841,71 @@ join cross-service): `creatorUsername`/`tierName` din `PostResponse`, `creatorUs
 Notification Service (MongoDB, eveniment la abonare/postare). Apoi Config Server, monitoring
 (Prometheus/Grafana), Redis (cache pe gating/display), JWT distribuit, Docker Compose, deploy.
 Monolitul se curăță DOAR la final.
+
+## 19. Microservicii — Docker Compose (toată stiva) (Faza 8, Pasul 4)
+
+> Ramura `microservices`. Monolitul de pe `main` (src/ + frontend/) NEATINS. Toată stiva de
+> backend pornește cu o singură comandă; bifează cerința de deployment cu Docker Compose.
+
+### Dockerfile unic, parametrizat (multi-stage) + dependența `common`
+Un singur **`services/Dockerfile`** pentru toate serviciile, ales cu build-arg **`MODULE`**:
+- **build stage** `maven:3.9-eclipse-temurin-21`: contextul de build e **`services/`** (tot reactorul),
+  build cu `mvn -pl ${MODULE} -am -DskipTests clean package`. **`-am` (also-make)** construiește
+  întâi `common` când serviciul depinde de el → așa se rezolvă dependența pe modulul partajat în Docker.
+- **runtime stage** `eclipse-temurin:21-jre` (imagine mică): copiază doar fat-jar-ul + `curl` (pt healthcheck).
+- Cache `.m2` între build-uri prin BuildKit (`RUN --mount=type=cache,target=/root/.m2`).
+- `services/.dockerignore` exclude `**/target`, `.run-logs`, `*.log` (context mic).
+- *Trade-off:* fiecare imagine reconstruiește `common` (no cross-image layer cache), dar `.m2` e cache-uit.
+
+### `services/docker-compose.yml` — structură & ordine
+Servicii: **postgres** (postgres:16, `creatorhub-db`, volum `creatorhub-stack-pgdata`, 5433:5432) →
+**eureka-server** (8761) → **user-service**/**subscription-service**/**content-service** → **api-gateway** (8085).
+Ordinea e impusă de **healthchecks + `depends_on: condition`**: postgres `service_healthy` (pg_isready),
+eureka `service_healthy` (curl `/actuator/health`), serviciile așteaptă postgres+eureka healthy, gateway
+așteaptă eureka healthy. Healthcheck servicii = `curl /actuator/health` (de aici **actuator** adăugat în
+toate modulele). Pe host se expun doar **8761** (Eureka) și **8085** (Gateway); serviciile de business
+sunt interne (se ajung prin gateway). Networking: comunicare prin **numele de serviciu** Docker.
+
+### Adrese pentru Docker fără a strica rularea locală (decizia: ENV VARS)
+Serviciile NU folosesc `localhost` în Docker. În compose injectez **variabile de mediu** care
+**suprascriu** valorile din profilul `dev` (relaxed binding Spring):
+- `SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/creatorhub` (portul **intern 5432**, prin numele serviciului)
+- `SPRING_DATASOURCE_USERNAME/PASSWORD=creatorhub`
+- `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/`
+
+Profilul `dev` rămâne activ și în Docker (păstrează `ddl-auto=update`, `default_schema`, `create_namespaces`
+→ schemele se creează automat); doar **adresele** sunt suprascrise. **Rularea locală** (fără Docker, fără
+env vars) folosește exact valorile din `application-dev.yml` (`localhost:5433`, `localhost:8761`) →
+**neatinsă**. Cele două moduri coexistă (verificat: user-service pornit local pe `dev` → conectat la
+`localhost:5433`, 200/401 pe endpoint-uri). *Nu a fost nevoie de un profil `docker` separat.*
+
+### Identitate prin gateway în Docker
+Filtrul de identitate apelează user-service prin **Eureka** (`lb://`/`http://user-service`), nu prin URL
+hardcodat → funcționează identic în Docker (discovery în rețeaua compose). Validat: gating inter-service
+prin gateway-ul din container.
+
+### Frontend — DECIZIE: în afara compose-ului (acest pas)
+Frontend-ul rămâne separat (`npm run dev` pe 5173), nu e containerizat acum. Motiv: e mai simplu și
+frontend-ul încă lovește monolitul pe 8081 (rebranșarea pe gateway + containerizarea lui = pas separat).
+Focus pe stiva de backend.
+
+### Conflict de port Postgres (rezolvat)
+Stiva are propriul postgres (`creatorhub-db`, 5433:5432). Postgres-ul standalone al monolitului
+(root `docker-compose.yml`, `creatorhub-postgres`, tot 5433) trebuie **oprit** înainte de a porni stiva
+(`docker stop creatorhub-postgres`). Cele două sunt alternative pt DB (nu se rulează simultan).
+
+### Comenzi
+```bash
+# Full stack (build + run):
+docker compose -f services/docker-compose.yml up --build        # -d pentru background
+docker compose -f services/docker-compose.yml ps                # status + health
+docker compose -f services/docker-compose.yml down              # oprește tot (+ -v pt volum)
+# Local dev (fără Docker): docker compose up -d (root, postgres) + ./mvnw -f services/pom.xml ... rulează jar pe profil dev
+```
+
+### Verificat (2026-06-23)
+- `docker compose build` → 5 imagini construite (EXIT 0). `up` → toate 6 containere **healthy** în ordine.
+- Eureka (host 8761): `USER/SUBSCRIPTION/CONTENT/API-GATEWAY` **UP**. (Gateway dă 503 ~30s până-și împrospătează registry-ul, apoi 200.)
+- **Prin gateway Docker (8085):** register/login → tier (creatorId=2) → post premium → abonare → **gating: fan abonat vede body, anonim locked** (apelul inter-service merge în rețeaua Docker).
+- Scheme separate în containerul DB: `users_svc`/`subs_svc`/`content_svc` (8 tabele).
+- **Rularea locală** (profil dev, `localhost:5433`) confirmată funcțională în paralel. `docker compose down` curat.

@@ -188,6 +188,21 @@ Commit-uri mici: `feat(eureka): ...`, `feat(gateway): ...`, `feat(probe): ...`.
    >   circuit breaker (subscription oprit → locked, nu 500), anti-spoofing (X-User-Id fals → 401/ignorat),
    >   scheme separate. **61 teste verzi** (28 user + 14 subs + 19 content).
    > - **RĂMAS:** Notification Service (MongoDB) — vezi pașii 3-10 de mai jos.
+
+   > ### ✅ PASUL 4 — Docker Compose (toată stiva) COMPLET (2026-06-23)
+   > Un singur `docker compose -f services/docker-compose.yml up --build` pornește
+   > Postgres + Eureka + user/subscription/content + Gateway. Detalii: **CLAUDE.md §19**. Pe scurt:
+   > - **Dockerfile unic parametrizat** (multi-stage, ARG `MODULE`, build din contextul `services/`
+   >   cu `mvn -pl ${MODULE} -am` → rezolvă `common`); runtime JRE + curl pt healthcheck.
+   > - **Ordine impusă de healthchecks:** postgres (pg_isready) → eureka (`/actuator/health`) →
+   >   servicii + gateway. Actuator adăugat în toate modulele.
+   > - **Adrese Docker = env vars** (`SPRING_DATASOURCE_URL=...postgres:5432...`,
+   >   `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=...eureka-server:8761...`) care suprascriu profilul
+   >   `dev` → **rularea locală (localhost:5433) rămâne neatinsă**. Fără profil `docker` separat.
+   > - **Frontend lăsat în afara compose** (rulează separat pe 5173).
+   > - **Verificat:** stivă healthy, gating inter-service prin gateway Docker, scheme separate în
+   >   containerul DB, `docker compose down` curat, ȘI rularea locală pe profil dev încă merge.
+   > - Asta acoperă pasul 9 de mai jos pentru backend; se EXTINDE când adăugăm Redis/Mongo/Prometheus.
 3. **Config Server** (`spring-cloud-config-server`) — externalizează `application.yml`-urile
    (porturi, datasource, secrete) într-un repo de config (Git sau `native`).
 4. **Resilience4j** pe apelurile cross-service (mai ales gating-ul premium): circuit
