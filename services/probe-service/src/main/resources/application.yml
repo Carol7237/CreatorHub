@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: probe-service   # this is the Eureka service-id used by the gateway (lb://probe-service)
+
+server:
+  port: 8091   # fixed (not 0) so we can also hit the service directly during validation; 8090 is taken.
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
