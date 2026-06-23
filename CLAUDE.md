@@ -176,10 +176,17 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
   Motion), CRUD complet prin UI, gating premium vizual, validare client-side,
   CSRF prin Vite proxy (same-origin). 11 pagini. Verificat end-to-end (login,
   feed, gating, 404). Detalii §15. **TOT textul UI în engleză.**
-- [ ] **Faza 8 (URMĂTOAREA) — Microservicii** (Spring Cloud: Eureka, Gateway,
+- [~] **Faza 8 (ÎN CURS) — Microservicii** (Spring Cloud: Eureka, Gateway,
   Config, Resilience4j), apoi Redis, MongoDB, monitorizare (Prometheus/Grafana),
   JWT distribuit. **PLANUL COMPLET ȘI PAȘII: vezi [`NEXT_STEPS.md`](NEXT_STEPS.md).**
   Se lucrează pe ramura `microservices` (nu pe `main`).
+  - [x] **Pasul 1 — Infrastructură (COMPLET, 2026-06-23):** schelet multi-module
+    Maven sub `services/` (parent `creatorhub-services`, Spring Cloud **2025.0.0**),
+    Eureka Server (8761), API Gateway (8085, reactiv), Probe Service (8091). Monolitul
+    de pe `main` rămâne NEATINS. Test-cheie validat: `GET :8085/api/probe/hello`
+    rutează prin Gateway → Eureka (`lb://probe-service`) → probe → **200**. Detalii §16.
+  - [ ] **Pasul 2+ — mutarea logicii** (User/Subscription/Content services), Config
+    Server, Resilience4j, monitoring, Redis, Mongo, JWT. Vezi `NEXT_STEPS.md` §5.
 
 ## 6. Comenzi utile
 
@@ -619,3 +626,55 @@ de la backend, `fieldErrors` se mapează pe câmpurile formularului (`setError`)
 `cd frontend && npm install && npm run dev` → `http://localhost:5173` (backend pe
 dev + Docker trebuie pornite). Build: `npm run build` (0 erori TS). **Tot textul
 UI e în engleză.** Admin dev: `admin` / `admin123`.
+
+## 16. Microservicii — Infrastructură (Faza 8, Pasul 1)
+
+> Ramura `microservices`. Monolitul de pe `main` (root `pom.xml` + `/src`) e
+> NEATINS. Detaliile pe pași și ce urmează: [`NEXT_STEPS.md`](NEXT_STEPS.md).
+
+### Organizarea repo (decizia §6 din NEXT_STEPS = varianta A, aplicată în siguranță)
+Multi-module Maven cu parent **`creatorhub-services`**, dar plasat sub **`services/pom.xml`**
+(NU în rădăcina repo-ului). Motiv: rădăcina e deja ocupată de `pom.xml`-ul monolitului;
+punând parent-ul microserviciilor sub `services/` **monolitul rămâne 100% neatins** și
+schimbarea e complet reversibilă (`main` rămâne livrabilul sigur). Parent-ul moștenește
+`spring-boot-starter-parent` 3.5.15 și importă BOM-ul Spring Cloud; build unic din
+`services/`. *Promovarea unui parent în rădăcina repo-ului care să adopte și monolitul
+ca modul e amânată intenționat pentru un pas ulterior (mai riscant).*
+
+```
+AWBD/
+├── pom.xml, src/        ← MONOLIT (neatins, pe main)
+├── frontend/            ← React (neatins)
+└── services/
+    ├── pom.xml          ← parent multi-module (creatorhub-services)
+    ├── eureka-server/   ← :8761
+    ├── api-gateway/     ← :8085
+    └── probe-service/   ← :8091 (throwaway, doar pt validare; se șterge)
+```
+
+### Versiuni & porturi
+- **Spring Cloud 2025.0.0** ("Northfields") — trenul compatibil cu Spring Boot 3.5.x.
+  *Verificat în Maven Central; ATENȚIE: 2024.0.x/"Moorgate" e pentru Boot 3.4.x, NU 3.5.x*
+  (nota din NEXT_STEPS presupunea greșit 2024.0.x).
+- **Eureka Server: 8761** (standalone). **API Gateway: 8085**. **Probe: 8091**.
+- **Conflict de port rezolvat:** 8080 e ocupat de **Oracle TNS listener (TNSLSNR)** pe
+  mașina de dev → gateway-ul ia **8085**. La fel, 8090 ocupat → probe pe **8091**.
+
+### Gateway
+Starter **`spring-cloud-starter-gateway-server-webflux`** (reactiv; cel ne-deprecat în
+2025.0.0 — vechiul `spring-cloud-starter-gateway` e deprecat). Rută explicită:
+`/api/probe/**` → `lb://probe-service` (discovery prin Eureka + Spring Cloud LoadBalancer).
+
+### Rulare & test-cheie (Pasul 1)
+Pornește în ordine (fiecare jar din `services/<modul>/target/`): **eureka-server →
+probe-service → api-gateway**. Build: `./mvnw -f services/pom.xml clean package`.
+- Eureka dashboard: `http://localhost:8761` → `PROBE-SERVICE` și `API-GATEWAY` UP.
+- **Test-cheie (validat 2026-06-23):** `GET http://localhost:8085/api/probe/hello`
+  → rutează prin Gateway → rezolvă prin Eureka → ajunge la probe (8091) → **200**
+  `{"message":"hello from probe-service","port":8091,"service":"probe-service"}`.
+
+### Note de tooling specifice
+- Build din rădăcină cu `-f services/pom.xml` (wrapper-ul monolitului e refolosit).
+- Rulare în fundal: `Start-Process java -jar ...` + poll pe `Started <App>` în log
+  (logurile de validare sunt în `services/.run-logs/`, ignorate de `*.log` din `.gitignore`).
+- Verificări HTTP: `curl.exe` (nu Invoke-WebRequest).
