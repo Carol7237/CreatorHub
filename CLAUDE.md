@@ -114,7 +114,7 @@ Eureka / Gateway / Config Server / Resilience4j până nu ajungem la acele faze.
   (ERROR pentru erori neașteptate). Verificat: **25 teste** verzi + logging la
   runtime. Detalii în §12.
 - [x] **Faza 6 — Testing (COMPLETĂ, 2026-06-23):** JaCoCo (raport + gate 70% pe
-  `service.impl`); **55 unit tests** Mockito izolate (7 service impls) + 25 teste
+  `service.impl`); **64 unit tests** Mockito izolate (7 service impls) + 25 teste
   de integrare (H2). Coverage service layer: **89.1% line** (gate trece). Total
   **89 teste** verzi. Detalii în §13.
 - [ ] **Faza 7 (următoarea) — Views / REST:** controllere REST pentru restul
@@ -390,7 +390,7 @@ e în `.gitignore`.
 
 **89 teste**, două categorii clar separate:
 
-### Unit tests (Mockito, FĂRĂ Spring/DB) — 55 teste
+### Unit tests (Mockito, FĂRĂ Spring/DB) — 64 teste
 `*ServiceImplTest` în `src/test/java/com/creatorhub/service/impl/`. Folosesc
 `@ExtendWith(MockitoExtension.class)`, `@Mock` pe repository-uri/`PasswordEncoder`,
 `@InjectMocks` pe `ServiceImpl`. Rapide, izolate, **nu ating baza de date**. Câte
