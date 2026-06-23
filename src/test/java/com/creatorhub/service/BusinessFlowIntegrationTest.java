@@ -28,14 +28,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Phase 2 smoke / flow tests for the service layer. They run on the "test"
- * profile (H2 in-memory, no Docker required) and roll back after each test
- * (@Transactional), so they are repeatable.
+ * End-to-end integration test (Scenario 1): the full business flow through the
+ * real service layer, wired by Spring, against H2 (no Docker). Rolls back after
+ * each test (@Transactional). Originally the Phase 2 flow tests.
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
-class Phase2ServiceFlowTests {
+class BusinessFlowIntegrationTest {
 
     @Autowired
     private UserService userService;

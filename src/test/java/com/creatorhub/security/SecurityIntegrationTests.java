@@ -28,7 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * End-to-end security tests on the "test" profile (H2, no Docker). Not
+ * End-to-end integration test (Scenario 2): authentication + role-based
+ * authorization via MockMvc, on the "test" profile (H2, no Docker). Not
  * transactional: registration must commit so the login flow can authenticate
  * against it; tests use unique usernames and H2 is recreated per run.
  */

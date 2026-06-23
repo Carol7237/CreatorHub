@@ -25,12 +25,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Phase 5 pagination & sorting tests (test profile / H2, rollback per test).
+ * End-to-end integration test (Scenario 3): pagination & sorting through the real
+ * service layer + H2 (test profile, rollback per test).
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
-class PaginationSortingTests {
+class PaginationSortingIntegrationTest {
 
     @Autowired
     private UserService userService;
