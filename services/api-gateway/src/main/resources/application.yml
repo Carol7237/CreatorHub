@@ -38,6 +38,15 @@ spring:
               predicates:
                 - Path=/api/notifications/**
 
+# JWT (HS256) — the gateway VALIDATES the access token at ingress and injects the
+# X-User-* identity headers for downstream services. The secret MUST be identical to
+# the User Service's creatorhub.jwt.secret (symmetric key). Same DEV-only default +
+# CREATORHUB_JWT_SECRET env override as the User Service — keep both in sync.
+creatorhub:
+  jwt:
+    secret: ${CREATORHUB_JWT_SECRET:dev-only-creatorhub-jwt-signing-secret-change-me-please-0123456789}
+    access-token-validity-seconds: ${CREATORHUB_JWT_TTL_SECONDS:7200}
+
 server:
   port: 8085   # 8080 is taken by Oracle TNS listener (TNSLSNR) on this machine.
 

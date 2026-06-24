@@ -1,35 +1,38 @@
 package com.creatorhub.gateway.filter;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.creatorhub.security.jwt.JwtPrincipal;
+import com.creatorhub.security.jwt.JwtService;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import java.util.Map;
+import java.util.Optional;
 
 /**
- * Resolves the caller's identity ONCE at the single ingress (the gateway) and
- * forwards it to downstream services as trusted headers.
+ * Resolves the caller's identity ONCE at the single ingress (the gateway) from a JWT
+ * and forwards it to downstream services as trusted headers.
  *
  * <ol>
  *   <li><b>Anti-spoofing:</b> any client-supplied {@code X-User-*} header is stripped
- *       FIRST, so a client cannot impersonate anyone by sending these headers.</li>
- *   <li><b>Resolve:</b> if a session cookie is present, call user-service
- *       {@code /api/auth/me} (load-balanced via Eureka) forwarding the cookie.</li>
- *   <li><b>Inject:</b> on success, set {@code X-User-Id} / {@code X-User-Roles}
- *       (ROLE_-prefixed) / {@code X-User-Name}. On failure or no session, the
- *       request proceeds anonymously (public endpoints still work).</li>
+ *       FIRST, so a client cannot impersonate anyone by sending these headers — the
+ *       gateway remains the only source of truth for identity.</li>
+ *   <li><b>Validate:</b> read {@code Authorization: Bearer <jwt>} and validate the
+ *       signature + expiry (HS256, shared secret) with {@link JwtService}.</li>
+ *   <li><b>Inject:</b> on a valid token, set {@code X-User-Id} / {@code X-User-Roles}
+ *       (comma-separated, ROLE_-prefixed) / {@code X-User-Name}. Missing/invalid/expired
+ *       token -> no identity injected, the request proceeds anonymously (public
+ *       endpoints still work; protected ones get 401 downstream).</li>
  * </ol>
  *
- * <p>Transitional, pre-JWT. At the JWT step this filter validates a JWT instead of
- * calling {@code /me}, injecting the same headers — downstream services stay unchanged.
+ * <p>Validation is CPU-bound and synchronous — fine inside this reactive filter (no
+ * blocking I/O, unlike the previous session lookup that called user-service {@code /me}).
+ * The downstream services are unchanged: only the SOURCE of identity moved from session
+ * to JWT.
  */
 @Component
 public class IdentityPropagationFilter implements GlobalFilter, Ordered {
@@ -40,61 +43,45 @@ public class IdentityPropagationFilter implements GlobalFilter, Ordered {
     static final String USER_ROLES = "X-User-Roles";
     static final String USER_NAME = "X-User-Name";
 
-    private static final Logger log = LoggerFactory.getLogger(IdentityPropagationFilter.class);
+    private static final String BEARER_PREFIX = "Bearer ";
 
-    private final WebClient webClient;
+    private final JwtService jwtService;
 
-    public IdentityPropagationFilter(WebClient.Builder loadBalancedWebClientBuilder) {
-        this.webClient = loadBalancedWebClientBuilder.baseUrl("http://user-service").build();
+    public IdentityPropagationFilter(JwtService jwtService) {
+        this.jwtService = jwtService;
     }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        // 1. Strip any client-supplied identity headers (trust only what we inject).
-        ServerHttpRequest stripped = exchange.getRequest().mutate()
+        Optional<JwtPrincipal> principal = bearerToken(exchange.getRequest())
+                .flatMap(jwtService::tryParse);
+
+        ServerHttpRequest request = exchange.getRequest().mutate()
                 .headers(h -> {
+                    // 1. Strip any client-supplied identity headers (trust only what we inject).
                     h.remove(USER_ID);
                     h.remove(USER_ROLES);
                     h.remove(USER_NAME);
+                    // 2. Inject identity ONLY from a validated token.
+                    principal.ifPresent(p -> {
+                        h.set(USER_ID, String.valueOf(p.userId()));
+                        h.set(USER_ROLES, String.join(",", p.roles()));
+                        if (p.username() != null) {
+                            h.set(USER_NAME, p.username());
+                        }
+                    });
                 })
                 .build();
 
-        String cookie = stripped.getHeaders().getFirst(HttpHeaders.COOKIE);
-        if (cookie == null || !cookie.contains("JSESSIONID")) {
-            // No session -> anonymous. Continue with stripped headers.
-            return chain.filter(exchange.mutate().request(stripped).build());
-        }
+        return chain.filter(exchange.mutate().request(request).build());
+    }
 
-        // 2. Resolve identity from user-service, forwarding the session cookie.
-        return webClient.get()
-                .uri("/api/auth/me")
-                .header(HttpHeaders.COOKIE, cookie)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .flatMap(me -> {
-                    Object id = me.get("id");
-                    Object role = me.get("role");
-                    Object username = me.get("username");
-                    ServerHttpRequest authed = stripped.mutate()
-                            .headers(h -> {
-                                if (id != null) {
-                                    h.set(USER_ID, String.valueOf(id));
-                                }
-                                if (role != null) {
-                                    h.set(USER_ROLES, "ROLE_" + role);
-                                }
-                                if (username != null) {
-                                    h.set(USER_NAME, String.valueOf(username));
-                                }
-                            })
-                            .build();
-                    return chain.filter(exchange.mutate().request(authed).build());
-                })
-                // 3. Not authenticated (401) or user-service hiccup -> proceed anonymously.
-                .onErrorResume(ex -> {
-                    log.debug("Identity resolution skipped ({}). Proceeding anonymously.", ex.toString());
-                    return chain.filter(exchange.mutate().request(stripped).build());
-                });
+    private static Optional<String> bearerToken(ServerHttpRequest request) {
+        String header = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        if (header != null && header.startsWith(BEARER_PREFIX)) {
+            return Optional.of(header.substring(BEARER_PREFIX.length()).trim());
+        }
+        return Optional.empty();
     }
 
     @Override

@@ -31,6 +31,15 @@
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
         </dependency>
 
+        <!-- Shared JWT utility: validate the Bearer token at the ingress (Step 2).
+             Pure (jjwt only) so it imports cleanly into the reactive gateway — the
+             whole reason it is a separate module and not part of `common`. -->
+        <dependency>
+            <groupId>com.creatorhub</groupId>
+            <artifactId>security-jwt</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
         <!-- Actuator: /actuator/health for the Docker Compose healthcheck. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
