@@ -1,362 +1,530 @@
 # CreatorHub
 
-A creator-subscriptions platform — a skeleton in the spirit of Patreon / Fanvue.
-Creators publish free and premium content; fans subscribe to paid tiers, access
-premium content, comment, and receive notifications.
+> A creator-subscriptions platform (in the spirit of Patreon / Fanvue), built first
+> as a clean Spring Boot **monolith** and then decomposed into **Spring Cloud
+> microservices** — with a React frontend, full observability, and Docker Compose
+> deployment.
 
-> University project (Aplicații Web cu Arhitectură de Microservicii), built to
-> production quality. Strategy: **monolith first, microservices last.** The
-> current codebase is the Spring Boot monolith skeleton; Spring Cloud, caching,
-> MongoDB, monitoring and the React frontend come in later phases.
+![Java](https://img.shields.io/badge/Java-21-orange)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.x-brightgreen)
+![Spring Cloud](https://img.shields.io/badge/Spring%20Cloud-2025.0.0-brightgreen)
+![Docker](https://img.shields.io/badge/Docker-Compose-blue)
+![License](https://img.shields.io/badge/license-academic-lightgrey)
 
-## Tech stack (current)
+> University project — *Aplicații Web cu Arhitectură de Microservicii* — built to
+> production quality. Repository: <https://github.com/Carol7237/CreatorHub>
 
-- Java 21
-- Spring Boot 3.5.x (Web, Data JPA, Validation, Lombok, DevTools)
-- Maven (via the Maven Wrapper — no local Maven install required)
-- PostgreSQL 16 (Docker)
+---
 
-## Getting started
+## Table of contents
 
-Prerequisites: Java 21 and Docker.
+1. [Overview](#1-overview)
+2. [Architecture](#2-architecture)
+3. [Tech stack](#3-tech-stack)
+4. [Data model (ER diagram)](#4-data-model-er-diagram)
+5. [Getting started (setup & run)](#5-getting-started-setup--run)
+6. [Feature demonstrations](#6-feature-demonstrations)
+7. [API documentation](#7-api-documentation)
+8. [Testing](#8-testing)
+9. [Security](#9-security)
+10. [Monitoring & observability](#10-monitoring--observability)
+11. [Screenshots](#11-screenshots)
+12. [AI in development](#12-ai-in-development)
+13. [Author & contributions](#13-author--contributions)
+14. [Roadmap / next steps](#14-roadmap--next-steps)
 
-```bash
-# 1. Start the database
-docker compose up -d
+---
 
-# 2. Compile the project
-./mvnw clean compile        # Windows: mvnw.cmd clean compile
+## 1. Overview
 
-# 3. (later) Run the application
-./mvnw spring-boot:run
+**CreatorHub** is a creator-subscriptions platform. Creators publish **free** and
+**premium** content; fans subscribe to paid **tiers**, unlock premium posts (gated),
+comment, and receive **notifications** when something happens (a new subscriber, a
+new comment).
+
+The project was built with a deliberate strategy — **monolith first, microservices
+last**:
+
+1. A complete, well-structured **Spring Boot monolith** (in [`src/`](src)) with a full
+   JPA model, service layer, Spring Security, validation, REST API, and a **React**
+   single-page frontend (in [`frontend/`](frontend)).
+2. That monolith was then **decomposed into Spring Cloud microservices** (in
+   [`services/`](services)): service discovery, an API gateway, a config server, four
+   business services, two databases (SQL + NoSQL), resilient inter-service calls, and
+   a Prometheus + Grafana monitoring stack.
+
+The monolith remains intact as a reference; the microservices are the main
+deliverable. The full design journal lives in [`CLAUDE.md`](CLAUDE.md) (sections
+§1–§23) and the step-by-step plan in [`NEXT_STEPS.md`](NEXT_STEPS.md).
+
+---
+
+## 2. Architecture
+
+A single **API Gateway** is the only entry point. It discovers backend services
+through **Eureka** and load-balances across them. Each business service owns its own
+data (schema-per-service in PostgreSQL, or a MongoDB database). Premium gating is a
+resilient inter-service call; events fan out to the notification service.
+
+```mermaid
+flowchart TB
+    subgraph client[Client]
+      FE["React SPA (Vite, :5173)"]
+      CURL["curl / HTTP clients"]
+    end
+
+    GW["API Gateway :8085<br/>(routing + identity propagation)"]
+    EUREKA["Eureka :8761<br/>(service discovery)"]
+    CONFIG["Config Server :8888<br/>(centralized config)"]
+
+    subgraph services[Business services]
+      US["user-service :8092<br/>auth, profiles, admin"]
+      SS["subscription-service :8093<br/>tiers, subscriptions"]
+      CS["content-service :8094<br/>posts, comments, tags"]
+      NS["notification-service :8095<br/>notifications"]
+    end
+
+    subgraph data[Data stores]
+      PG[("PostgreSQL :5433<br/>users_svc · subs_svc · content_svc")]
+      MG[("MongoDB<br/>notifications_db")]
+    end
+
+    subgraph obs[Observability]
+      PROM["Prometheus :9090"]
+      GRAF["Grafana :3000"]
+    end
+
+    FE --> GW
+    CURL --> GW
+    GW -->|lb:// via Eureka| US & SS & CS & NS
+    US & SS & CS & NS -.register.-> EUREKA
+    GW -.discovery.-> EUREKA
+    US & SS & CS & NS & GW -.optional config.-> CONFIG
+
+    US --> PG
+    SS --> PG
+    CS --> PG
+    NS --> MG
+
+    CS -->|premium gating<br/>OpenFeign + circuit breaker| SS
+    SS -->|NEW_SUBSCRIBER| NS
+    CS -->|NEW_COMMENT| NS
+
+    PROM -.scrape /actuator/prometheus.-> US & SS & CS & NS & GW & EUREKA & CONFIG
+    GRAF --> PROM
 ```
 
-The application connects to PostgreSQL on `localhost:5433` (host port mapped to
-the container's 5432; database `creatorhub`, user `creatorhub`, password
-`creatorhub` — development credentials only) and serves HTTP on port `8081`.
-Both ports avoid common dev-machine conflicts (a native PostgreSQL on 5432, an
-Oracle listener on 8080).
+### Services
 
-## Microservices stack (Docker Compose)
+| Service | Port | Responsibility | Data store |
+|---|---|---|---|
+| **api-gateway** | 8085 | Single entry point; routes by path to services via Eureka; injects trusted identity headers | — |
+| **eureka-server** | 8761 | Service discovery / registry | — |
+| **config-server** | 8888 | Centralized configuration (native backend) | — |
+| **user-service** | 8092 | User + Profile, authentication/security, creators browsing, admin | PostgreSQL `users_svc` |
+| **subscription-service** | 8093 | SubscriptionTier + Subscription; internal gating endpoint | PostgreSQL `subs_svc` |
+| **content-service** | 8094 | Post + Comment + Tag; premium gating; load-balancing demo | PostgreSQL `content_svc` |
+| **notification-service** | 8095 | Notifications (event-driven, best-effort) | MongoDB `notifications_db` |
 
-> The project is being split into Spring Cloud microservices on the `microservices`
-> branch (the monolith above stays intact on `main`). The whole **backend** stack runs
-> with one command. Full design in [CLAUDE.md](CLAUDE.md) §16–§19.
+> The legacy **monolith** ([`src/`](src)) runs on **8081** and is an alternative way
+> to run the whole app in one process (see [Getting started](#5-getting-started-setup--run)).
 
-Services: **Eureka** (discovery, `:8761`) · **API Gateway** (single entry point, `:8085`) ·
-**user-service** · **subscription-service** · **content-service** · **notification-service** ·
-**PostgreSQL** (each relational service owns its own schema: `users_svc`, `subs_svc`,
-`content_svc`) · **MongoDB** (NoSQL, for notification-service — `notifications_db`). Premium
-gating is an inter-service call (Content → Subscription) protected by a Resilience4j circuit
-breaker (fail-closed); notifications are fired on subscribe/comment events (Subscription/Content
-→ Notification) with a fail-open circuit breaker (best-effort). The gateway authenticates the
-session and forwards a trusted identity header to the stateless downstream services.
+### Key architecture decisions
 
-```bash
-# Build + run the entire backend stack (one command):
-docker compose -f services/docker-compose.yml up --build      # add -d for background
-docker compose -f services/docker-compose.yml ps              # status + health
-docker compose -f services/docker-compose.yml down            # stop everything (-v drops the DB volume)
+- **Monolith-first, then decomposition** — the domain model and business rules were
+  proven in a monolith, then migrated service-by-service (no big-bang rewrite).
+- **Schema-per-service** — each relational service owns its own PostgreSQL schema
+  (`users_svc`, `subs_svc`, `content_svc`) in a shared database; cross-service
+  references are by **id only** (no cross-service foreign keys). Notifications use
+  **MongoDB** (a natural NoSQL fit for relation-free, append-style documents).
+- **Gateway-injected identity (anti-spoofing)** — the gateway is the single source of
+  truth for identity: it authenticates the session, **strips any client-supplied
+  `X-User-*` headers**, and injects trusted `X-User-Id` / `X-User-Roles`. Downstream
+  services are stateless and read identity from those headers. (Distributed JWT is the
+  planned evolution; the gateway filter would simply validate the token instead.)
+- **Resilient inter-service calls** — content→subscription gating uses **OpenFeign +
+  Resilience4j circuit breaker**. The premium-gating fallback is **fail-closed** (when
+  in doubt, lock the post); the notification fallback is **fail-open** (a missed
+  notification must never block a subscription or comment).
+- **Robust centralized config** — services import config with `optional:configserver:…`
+  so they still start on local config if the Config Server is unavailable.
+
+---
+
+## 3. Tech stack
+
+| Area | Technologies |
+|---|---|
+| Language / runtime | **Java 21** (Temurin) |
+| Framework | **Spring Boot 3.5.x**, **Spring Cloud 2025.0.0** |
+| Cloud | Eureka (discovery), Spring Cloud Gateway, Config Server, OpenFeign, Spring Cloud LoadBalancer, Spring Cloud CircuitBreaker (**Resilience4j**) |
+| Security | Spring Security (session + BCrypt + CSRF + roles; header-based identity downstream) |
+| Persistence | Spring Data JPA + **PostgreSQL 16**; Spring Data MongoDB + **MongoDB 7** |
+| Observability | Micrometer + **Prometheus** + **Grafana**; Spring Boot Actuator |
+| API docs | springdoc-openapi (**Swagger UI**) |
+| Build & run | **Maven** (wrapper), **Docker** + **Docker Compose** |
+| Testing | JUnit 5, Mockito, AssertJ, Spring Test, **H2**, **JaCoCo** |
+| Frontend | **React 18** + **TypeScript** + **Vite**, React Router, TanStack Query, Framer Motion, React Hook Form |
+
+---
+
+## 4. Data model (ER diagram)
+
+The domain has **7 entities** (+ a `post_tags` join table) and two enums (`Role`,
+`SubStatus`). In the monolith they form one relational model; in the microservices
+they are **distributed across services** and linked by **id** (no cross-service FKs):
+
+| Entities | Owned by | Store |
+|---|---|---|
+| `User`, `Profile` | user-service | `users_svc` |
+| `SubscriptionTier`, `Subscription` | subscription-service | `subs_svc` |
+| `Post`, `Comment`, `Tag` | content-service | `content_svc` |
+| `Notification` | notification-service | MongoDB `notifications_db` |
+
+```mermaid
+erDiagram
+    USER ||--|| PROFILE : has
+    USER ||--o{ SUBSCRIPTION_TIER : "creates (creator)"
+    USER ||--o{ POST : "authors"
+    USER ||--o{ COMMENT : "writes"
+    USER ||--o{ SUBSCRIPTION : "holds (fan)"
+    SUBSCRIPTION_TIER ||--o{ SUBSCRIPTION : "subscribed by"
+    SUBSCRIPTION_TIER ||--o{ POST : "gates"
+    POST ||--o{ COMMENT : "has"
+    POST }o--o{ TAG : "tagged with"
+
+    USER {
+      Long id PK
+      string username UK
+      string email UK
+      string password "BCrypt hash"
+      Role role "USER / ADMIN"
+      boolean enabled
+    }
+    PROFILE {
+      Long id PK
+      string displayName
+      string bio
+      string avatarUrl
+      Long user_id FK
+    }
+    SUBSCRIPTION_TIER {
+      Long id PK
+      string name
+      decimal priceMonthly
+      string perks
+      Long creator_id "ref User"
+    }
+    SUBSCRIPTION {
+      Long id PK
+      Long fan_id "ref User"
+      Long tier_id FK
+      date startDate
+      SubStatus status "ACTIVE/CANCELLED/EXPIRED"
+    }
+    POST {
+      Long id PK
+      string title
+      text body
+      boolean premium
+      datetime createdAt
+      Long author_id "ref User"
+      Long tier_id "ref Tier (nullable)"
+    }
+    COMMENT {
+      Long id PK
+      string text
+      datetime createdAt
+      Long post_id FK
+      Long author_id "ref User"
+    }
+    TAG {
+      Long id PK
+      string name UK
+    }
 ```
 
-Everything is reached through the **gateway on `http://localhost:8085`** (e.g.
-`POST /api/auth/register`, `POST /api/auth/login`, `GET /api/posts`, `POST /api/tiers`).
-The Eureka dashboard is at `http://localhost:8761`. Start order is enforced by
-healthchecks (Postgres → Eureka → services → gateway).
+> `Notification` (MongoDB) is a standalone document: `recipientId`, `type`
+> (`NEW_SUBSCRIBER` / `NEW_COMMENT`), `message`, `actorId`, `relatedId`, `read`,
+> `createdAt`.
 
-> The stack's PostgreSQL also uses host port `5433`, so stop the standalone monolith
-> database first (`docker stop creatorhub-postgres`). In Docker the addresses come from
-> environment variables in the compose file; running a service **locally** (without
-> Docker, profile `dev`) still uses `localhost:5433` / `localhost:8761` — the two modes
-> coexist. The React frontend is not containerized yet (run it separately, see below).
+---
 
-### Monitoring (Prometheus + Grafana)
+## 5. Getting started (setup & run)
 
-The stack ships with monitoring. Every service exposes metrics via Spring Boot
-Actuator + Micrometer at `/actuator/prometheus` (internal only — not routed by the
-gateway). **Prometheus** scrapes all services; **Grafana** visualizes them with an
-auto-provisioned data source and dashboard.
+### Prerequisites
 
-- **Prometheus** — `http://localhost:9090` (Status → Targets shows every service `UP`).
-- **Grafana** — `http://localhost:3000`, login `admin` / `admin` (dev only). The
-  "CreatorHub — Microservices Overview" dashboard is provisioned automatically: HTTP
-  request rate and p95 latency per service, JVM heap, and the Resilience4j circuit
-  breaker state. Stop `subscription-service` and hit a premium post to watch the
-  `subscriptionAccess` breaker flip from closed to open in real time.
+- **Java 21** (JDK)
+- **Docker Desktop** (Compose v2)
+- **Node.js 18+** (only for the React frontend)
+- Maven is **not** required — the project ships the Maven Wrapper (`mvnw` / `mvnw.cmd`).
 
-### Load balancing (scale a service)
+### Option A — full microservices stack with Docker Compose (recommended)
 
-Client-side load balancing (Spring Cloud LoadBalancer over Eureka) is built in. To
-demonstrate it, run a service with two instances and watch the gateway round-robin
-between them:
+One command builds and starts PostgreSQL, MongoDB, Eureka, the Config Server, all four
+business services, the gateway, Prometheus and Grafana:
 
 ```bash
-docker stop creatorhub-postgres
-docker compose -f services/docker-compose.yml up -d --scale content-service=2 --build
+# the stack ships its own PostgreSQL on host port 5433 — stop a standalone one first:
+docker stop creatorhub-postgres   # ignore the error if it isn't running
+
+docker compose -f services/docker-compose.yml up -d --build
+docker compose -f services/docker-compose.yml ps        # watch services become healthy
 ```
 
-Both instances register in Eureka under `CONTENT-SERVICE` (check
-`http://localhost:8761`). Each replica reports its identity at
-`GET /api/content/instance`. Hit it a few times through the gateway and the
-`instanceId` alternates between the two — proof of round-robin distribution:
+Exposed on the host:
+
+| URL | What |
+|---|---|
+| <http://localhost:8085> | **API Gateway** (single entry point) |
+| <http://localhost:8761> | Eureka dashboard (all services `UP`) |
+| <http://localhost:8888> | Config Server (`/<service>/default` serves config) |
+| <http://localhost:9090> | Prometheus (Status → Targets) |
+| <http://localhost:3000> | Grafana (`admin` / `admin`) |
+
+> **Note:** right after startup the gateway needs ~30 s to refresh its service
+> registry — the first calls may return `503` until it sees the instances, then `200`.
+
+Stop everything:
 
 ```bash
-# PowerShell: 1..12 | %{ curl.exe -s http://localhost:8085/api/content/instance }
+docker compose -f services/docker-compose.yml down       # add -v to also drop volumes
 ```
 
-(`content-service` has no fixed `container_name` and no host port, which is what
-lets Docker Compose scale it. Stopping one instance leaves the other serving — the
-service stays available.)
+### Option B — the React frontend (dev)
 
-### Centralized configuration (Spring Cloud Config Server)
-
-A **Config Server** (`:8888`, native backend — config files bundled under
-`services/config-server/.../config-repo/`) serves centralized configuration to the
-services. Each service imports it at startup with
-`spring.config.import=optional:configserver:...`; the `optional:` prefix means a
-service **still starts on its local config if the Config Server is down**, so it
-never becomes a single point of failure.
+The SPA currently targets the monolith on `:8081`. Run it alongside the monolith
+(Option C) for a full UI experience:
 
 ```bash
-# Config Server serves config as JSON:
-curl http://localhost:8888/content-service/default
-curl http://localhost:8888/user-service/default
-# Proof a service actually consumed it (a property defined ONLY in the Config Server):
-curl http://localhost:8085/api/content/instance
-#   -> "configSource":"Spring Cloud Config Server (centralized, native backend)"
-```
-
-Common settings (actuator/metrics exposure, pagination, a marker property) live in
-`application.yml`; per-service files (`<service>.yml`) add service-specific values.
-DB credentials stay externalized via Spring profiles + Docker env vars (in a
-production setup they would be centralized here, encrypted with `{cipher}`).
-
-## Frontend (React SPA)
-
-A separate React + TypeScript + Vite app lives in [`frontend/`](frontend). It is
-a night-owl cyberpunk UI (dark + electric violet, glow, motion) that consumes the
-REST API. Prerequisite: Node.js 18+.
-
-```bash
-# run the full stack
-docker compose up -d          # database
-./mvnw spring-boot:run        # backend on :8081 (dev profile)
-
 cd frontend
 npm install
-npm run dev                   # frontend on http://localhost:5173
+npm run dev          # http://localhost:5173
 ```
 
-Open **http://localhost:5173**. The Vite dev server proxies `/api` to the backend
-on `:8081`, which keeps the SPA same-origin with the API so the cookie-based CSRF
-flow works (see [CLAUDE.md](CLAUDE.md) §15). Log in on dev with `admin` / `admin123`,
-or register a new account. All UI text is in English.
-
-Stack: React Router, TanStack Query, Framer Motion (animations), React Hook Form
-(validation). Pages: feed (with premium gating), post detail + comments, creators,
-tiers, subscriptions, create/edit post, profile, admin, and a custom 404.
-
-> Screenshots: add under `docs/screenshots/` (feed, premium lock overlay, login).
-
-## Environments (Spring profiles)
-
-Two profiles, each backed by its own database:
-
-| Profile | Database | When |
-|---------|----------|------|
-| `dev` (default) | PostgreSQL 16 in Docker (`localhost:5433`) | running the app locally |
-| `test` | H2 in-memory | automated tests (`@ActiveProfiles("test")`) |
+### Option C — the monolith (single process)
 
 ```bash
-# DEV — needs Docker (the default profile)
-docker compose up -d
-./mvnw spring-boot:run          # active profile: dev, HTTP on :8081
-
-# TEST — needs NO Docker (H2 in-memory)
-./mvnw clean test               # active profile: test
+docker compose up -d                 # PostgreSQL (5433) + MongoDB (root infra)
+./mvnw spring-boot:run               # monolith on :8081 (profile dev)   (Windows: mvnw.cmd)
 ```
 
-Config files: `application.yml` (common, defaults the active profile to `dev`),
-`application-dev.yml` (PostgreSQL), `application-test.yml` (H2). A production
-profile with externalized secrets will be added in a later phase.
+### Credentials & ports
 
-## Security & authentication
+- **Dev admin** (seeded on the `dev` profile only): `admin` / `admin123`.
+- **Grafana**: `admin` / `admin` (dev).
+- **PostgreSQL**: host `5433` → container `5432`, db/user/pass `creatorhub`.
+  If a native PostgreSQL occupies `5433`, stop it before starting a stack that ships
+  its own database.
 
-Session-based authentication backed by the database (BCrypt passwords, CSRF
-active, roles `USER` / `ADMIN`, token-based remember-me). It is exposed via REST
-so a React SPA can consume it; a minimal custom login page is served at
-[`/login`](http://localhost:8081/login) for manual testing.
+> **Live deployment:** not deployed to a public host yet (planned — see
+> [Roadmap](#14-roadmap--next-steps)). The Docker Compose stack above is the primary,
+> reproducible way to run the whole system.
 
-Endpoints (run on dev, `:8081`):
+---
+
+## 6. Feature demonstrations
+
+All commands target the gateway at `http://localhost:8085`. PowerShell users can run
+the `curl` loops with `1..N | %{ curl.exe ... }`.
+
+- **Premium gating (inter-service call).** Create a tier and a premium post, have a fan
+  subscribe, then `GET /api/posts/{id}`: the subscribed fan sees the `body`
+  (`locked:false`); an anonymous/non-subscribed viewer gets `locked:true` with no body;
+  the author and admins always see it.
+- **Load balancing (round-robin).** Scale a service and watch requests alternate
+  between instances:
+  ```bash
+  docker compose -f services/docker-compose.yml up -d --scale content-service=2
+  # both register under CONTENT-SERVICE in Eureka; instanceId alternates 50/50:
+  curl http://localhost:8085/api/content/instance     # run ~12 times
+  ```
+- **Resilience (circuit breaker, fail-closed).** `docker stop creatorhub-subscription`,
+  then request a premium post as a subscribed fan → it stays **`locked:true`, HTTP 200**
+  (no 500, no cascade). The `subscriptionAccess` breaker trips to `open` — visible in
+  Grafana (`resilience4j_circuitbreaker_state`).
+- **Notifications (event-driven, fail-open).** A subscription creates a `NEW_SUBSCRIBER`
+  notification for the creator; a comment creates a `NEW_COMMENT`. Stop the notification
+  service and the subscription/comment still succeed (the notification is best-effort).
+- **Centralized config.** `curl http://localhost:8888/content-service/default` returns
+  the served config; `curl http://localhost:8085/api/content/instance` shows
+  `"configSource":"Spring Cloud Config Server (centralized…)"` — a property defined
+  **only** in the Config Server, proving the service consumed it.
+- **Monitoring.** Prometheus → Status → Targets (all `UP`); Grafana → "CreatorHub —
+  Microservices Overview" dashboard.
+
+---
+
+## 7. API documentation
+
+All client traffic goes through the **gateway (`:8085`)**, which routes by path:
+
+| Path prefix | Service |
+|---|---|
+| `/api/auth/**`, `/api/creators/**`, `/api/profiles/**`, `/api/admin/**` | user-service |
+| `/api/tiers/**`, `/api/subscriptions/**` | subscription-service |
+| `/api/posts/**`, `/api/comments/**`, `/api/tags/**`, `/api/content/**` | content-service |
+| `/api/notifications/**` | notification-service |
+
+**Swagger UI / OpenAPI** is available per business service (springdoc) when the service
+is directly reachable — e.g. running locally, `http://localhost:8092/swagger-ui.html`
+(user), `:8093` (subscription), `:8094` (content), `:8095` (notification). The monolith
+exposes it at `http://localhost:8081/swagger-ui.html`.
+
+### Main endpoints
 
 | Method & path | Access | Purpose |
 |---|---|---|
 | `POST /api/auth/register` | public | create a `USER` account |
-| `POST /api/auth/login` | public | log in (creates a session) |
-| `POST /api/auth/logout` | session | log out |
-| `GET /api/auth/me` | authenticated | current user |
-| `GET /api/admin/users` | `ADMIN` | list all users |
+| `POST /api/auth/login` · `GET /api/auth/csrf` | public | log in (session) · CSRF bootstrap |
+| `GET /api/auth/me` · `POST /api/auth/logout` | auth | current user · log out |
+| `GET /api/creators` · `/{id}` | public | browse creators |
+| `GET /api/profiles/{id}` · `/user/{userId}` | public | view a profile |
+| `PUT /api/profiles/{id}` | owner/admin | update a profile |
+| `GET /api/tiers` (`?creatorId=`) · `/{id}` | public/auth | browse tiers |
+| `POST /api/tiers` · `PUT/DELETE /{id}` | auth · owner/admin | manage tiers |
+| `GET /api/subscriptions` | auth | my subscriptions |
+| `POST /api/subscriptions` · `POST /{id}/cancel` · `DELETE /{id}` | auth · owner/admin | subscribe / cancel |
+| `GET /api/posts` (paged, gated) · `/{id}` · `/{id}/comments` (`?creatorId=`) | public | browse posts (premium bodies locked) |
+| `POST /api/posts` · `PUT/DELETE /{id}` | auth · owner/admin | manage posts |
+| `POST /api/comments` · `PUT/DELETE /{id}` | auth · owner/admin | comment (premium posts require access) |
+| `GET /api/tags` · `/{id}` | public | browse tags |
+| `POST /api/tags` · `DELETE /{id}` | auth · ADMIN | manage tags |
+| `GET /api/notifications` · `/unread-count` | auth | my notifications |
+| `POST /api/notifications/{id}/read` · `/read-all` | auth | mark read |
+| `GET /api/admin/users` · `DELETE /{id}` | ADMIN | admin user management |
+| `GET /api/content/instance` | public | load-balancing demo (reports the serving instance) |
 
-**CSRF:** state-changing requests need the CSRF token. Clients first do a `GET`
-(e.g. load `/login`) to receive the `XSRF-TOKEN` cookie, then send it back in the
-`X-XSRF-TOKEN` header. The static login page does this automatically.
-
-**Dev admin (development only):** on the `dev` profile an admin is seeded at
-startup — username `admin`, password `admin123`. These are development-only
-credentials and are never seeded in `test` or production. Self-registration only
-ever creates `USER` accounts.
-
-See [CLAUDE.md](CLAUDE.md) §11 for the full security design (login-page decision,
-CSRF for SPA, remember-me, URL authorization convention, and how JWT will be added
-on top at the microservices stage).
-
-## REST API & docs
-
-The backend is a REST API under `/api`. Interactive documentation is generated
-with **springdoc / Swagger UI**:
-
-- Swagger UI: [`/swagger-ui.html`](http://localhost:8081/swagger-ui.html)
-- OpenAPI spec: [`/v3/api-docs`](http://localhost:8081/v3/api-docs)
-
-Highlights (full table in [CLAUDE.md](CLAUDE.md) §14):
-
-- Resources: `posts`, `creators`, `profiles`, `tiers`, `subscriptions`, `comments`,
-  `tags`, plus `auth` and `admin`. Standard verbs (GET/POST/PUT/DELETE) and codes
-  (200/201/204/400/401/403/404/409).
-- **Owner from context:** create requests do NOT take an owner id — the owner is
-  the authenticated user. Update/delete require the owner (or an admin).
-- **Premium gating:** premium posts come back `locked: true` with no `body` unless
-  you’re the author, an admin, or an active subscriber. Same rule gates commenting
-  on premium posts.
-- **Validation:** invalid request bodies return `400` with a `fieldErrors` map
-  (field → message). Malformed JSON also returns `400`.
-
-```jsonc
-// 400 example
-{ "status": 400, "error": "Bad Request", "message": "Validation failed",
-  "fieldErrors": { "name": "Tier name is required",
-                   "priceMonthly": "Monthly price must be greater than 0" } }
-```
-
-### CORS (for the React SPA in 7B)
-
-CORS allows the dev front-end origins `http://localhost:5173` / `:3000` with
-credentials. Because a cross-origin SPA cannot read the `XSRF-TOKEN` cookie, the
-**recommended dev setup is a Vite proxy** (`/api` → `:8081`, same-origin), or the
-SPA can read the token from `GET /api/auth/csrf` and send it in `X-XSRF-TOKEN`.
-Custom server error pages live at `static/error/404.html` and `500.html`.
-
-## Pagination & sorting
-
-`Post`, `User` and `Subscription` support pagination and sorting. The service
-layer returns a stable `PagedResponse<T>` and, once REST controllers exist (Views
-phase), the API will accept the standard Spring Data params:
-
-```
-GET /api/posts?page=0&size=20&sort=title,asc
-GET /api/posts?page=1&size=10&sort=createdAt,desc
-```
-
-- Page numbers are **0-based**; default size **20**, hard max **100**.
-- Allowed sort fields (whitelisted — anything else returns `400`):
-  posts `id,title,createdAt,premium`; users `id,username,email,role,enabled`
-  (never `password`); subscriptions `id,startDate,status`.
-
-## Logging
-
-SLF4J + Logback (`logback-spring.xml`). Logs go to the console and to files under
-`logs/` (git-ignored):
-
-- `logs/creatorhub.log` — general log (rolling by size/day).
-- `logs/creatorhub-error.log` — **errors only** (`ERROR` and above).
-
-Levels per profile: `dev` logs `com.creatorhub` at `DEBUG`; `test` is quiet
-(`WARN`, console only). An AOP aspect logs service method entry/exit and timing at
-`DEBUG`. Passwords and tokens are **never** logged.
-
-## Testing
-
-89 tests, in two clearly separated kinds (all run with `./mvnw test`, no Docker):
-
-- **Unit tests** (`*ServiceImplTest`) — JUnit 5 + Mockito, no Spring context and
-  **no database** (repositories are mocked). One per service implementation.
-- **Integration tests** (`*IntegrationTest`) — `@SpringBootTest` on the `test`
-  profile against **H2 in-memory**. Three end-to-end scenarios: the business flow
-  (creator → tier → premium post → subscribe → comment), security/authorization,
-  and pagination/sorting.
-
-```bash
-./mvnw clean test       # run all tests + generate the coverage report
-./mvnw clean verify     # also enforce the 70% service-layer coverage gate
-```
-
-Coverage is measured with **JaCoCo**. The HTML report is at
-`target/site/jacoco/index.html`. The service layer (`com.creatorhub.service.impl`)
-is at **~89% line coverage**, and `mvn verify` fails the build if it drops below
-70%. Non-logic classes (entities, DTOs/mappers, config, security wiring, the AOP
-aspect, the main class, simple exceptions) are excluded so the number reflects
-real business logic.
-
-## Project layout
-
-```
-src/main/java/com/creatorhub
-├── controller   # REST endpoints
-├── service      # business logic
-├── repository   # Spring Data JPA repositories
-├── model        # JPA entities
-├── dto          # request/response data transfer objects
-├── exception    # custom exceptions + global handler
-└── config       # Spring configuration
-```
-
-## Data model (domain)
-
-The domain has **7 entities** plus one many-to-many join table (`post_tags`).
-Enums (`Role`, `SubStatus`) live in `com.creatorhub.model.enums` and are stored
-as strings.
-
-### Entities
-
-- **User** — the base account. The same account can act as both a creator and a
-  fan. Fields: `username` (unique), `email` (unique), `password` (will hold a
-  BCrypt hash from the Security phase), `role` (`USER` / `ADMIN`), `enabled`.
-  Mapped to the table `users` (`user` is a reserved word in PostgreSQL).
-- **Profile** — public profile data, kept separate from the account: `displayName`,
-  `bio` (up to ~1000 chars), `avatarUrl` (optional).
-- **SubscriptionTier** — a paid level offered by a creator (e.g. "Basic", "VIP"):
-  `name`, `priceMonthly` (`BigDecimal`, `numeric(10,2)`), `perks` (optional).
-- **Post** — a piece of content, free or premium: `title`, `body` (TEXT),
-  `premium` flag, `createdAt` (set on insert).
-- **Subscription** — a fan's subscription to a tier; a link entity with its own
-  data: `startDate` (set on insert), `status` (`ACTIVE` / `CANCELLED` / `EXPIRED`).
-- **Comment** — a comment on a post: `text`, `createdAt` (set on insert).
-- **Tag** — a label for posts: `name` (unique).
-
-### Relationships
-
-- **User 1—1 Profile.** A user has exactly one profile. *Profile* is the owning
-  side and holds the `user_id` FK (so `user_id` lives in the `profile` table).
-  Deleting a user deletes its profile (cascade + orphan removal).
-- **User 1—N SubscriptionTier.** As a creator, a user offers many tiers
-  (`subscription_tier.creator_id`).
-- **User 1—N Post.** As a creator, a user authors many posts (`post.author_id`).
-- **User 1—N Comment.** A user writes many comments (`comment.author_id`).
-- **User 1—N Subscription.** As a fan, a user holds many subscriptions
-  (`subscription.fan_id`).
-- **SubscriptionTier 1—N Subscription.** A tier has many subscriptions
-  (`subscription.tier_id`).
-- **SubscriptionTier 1—N Post.** A tier gates many posts (`post.tier_id`,
-  nullable — a free post has no tier).
-- **Post 1—N Comment.** A post has many comments (`comment.post_id`). Deleting a
-  post deletes its comments (cascade + orphan removal).
-- **Post N—N Tag.** Posts and tags relate many-to-many through the `post_tags`
-  join table. *Post* is the owning side (declares `@JoinTable`); *Tag* is the
-  inverse side (`mappedBy`).
-
-All `@ManyToOne`, `@OneToMany` and `@ManyToMany` associations are fetched
-**LAZY**. A diagram image will be added later; this is the textual ER reference.
+Error responses are a uniform JSON body (`timestamp`, `status`, `error`, `message`,
+`path`, and `fieldErrors` for validation failures).
 
 ---
 
-See [CLAUDE.md](CLAUDE.md) for the full project guide, working rules and phase progress.
+## 8. Testing
+
+```bash
+./mvnw -f services/pom.xml clean verify     # microservices: build + run all tests
+./mvnw clean verify                         # monolith: tests + JaCoCo coverage gate
+```
+
+- **Microservices:** **68 tests** across the services (user 28, subscription 14,
+  content 19, notification 7) — Mockito **unit tests** (no DB) for the business rules,
+  plus **MockMvc integration tests** on **H2** for security/authorization. The config
+  client and Eureka are disabled in the `test` profile (isolated, no Docker needed).
+- **Monolith:** **105 tests** (64 Mockito unit + integration on H2), with a **JaCoCo**
+  gate of 70% line coverage on the service layer (achieved **~87%**).
+
+Unit tests mock repositories; integration tests use **H2** in `MODE=PostgreSQL` — no
+Docker required to run the test suite.
+
+---
+
+## 9. Security
+
+- **Authentication (user-service / monolith):** database-backed, **session**-based,
+  **BCrypt** passwords, **CSRF** (cookie-based, SPA-friendly), role-based authorization
+  (`USER` / `ADMIN`), token-based remember-me. Exposed over REST so the SPA consumes the
+  same endpoints. Self-registration only ever creates `USER` accounts.
+- **Distributed identity (microservices):** the **gateway** authenticates the session,
+  **strips any client-supplied `X-User-*` headers** (anti-spoofing), and injects trusted
+  `X-User-Id` / `X-User-Roles`. Stateless downstream services read identity from those
+  headers; ownership/role checks (`@PreAuthorize`, URL rules) work unchanged.
+- **Premium gating** is enforced in the service layer (not by URL) via the resilient
+  content→subscription call.
+- Credentials in this repo are **development-only** (documented dev admin, dev DB/Grafana
+  passwords). **Distributed JWT** is the planned next step (the foundation —
+  `CustomUserDetailsService` + `PasswordEncoder` — is reused unchanged).
+
+---
+
+## 10. Monitoring & observability
+
+Every service exposes metrics via Actuator + Micrometer at `/actuator/prometheus`
+(internal only — **not** routed by the gateway). **Prometheus** (`:9090`) scrapes them;
+**Grafana** (`:3000`, `admin`/`admin`) visualizes them with an auto-provisioned data
+source and the **"CreatorHub — Microservices Overview"** dashboard:
+
+- HTTP request rate and p95 latency per service, JVM heap, target health.
+- **Resilience4j circuit-breaker state** (`resilience4j_circuitbreaker_state`) — stop
+  `subscription-service`, hit a premium post, and watch the `subscriptionAccess` breaker
+  flip from `closed` to `open` live.
+
+---
+
+## 11. Screenshots
+
+Screenshots live under [`docs/screenshots/`](docs/screenshots) and are referenced
+below. *(To be added by the author — captures from a running instance.)*
+
+| File | What to capture |
+|---|---|
+| `feed.png` | React feed page (cyberpunk theme) with free + premium posts |
+| `login.png` | Login page |
+| `premium-locked.png` | A premium post card with the locked/blur overlay (the highlight) |
+| `post-detail.png` | Post detail + comments |
+| `eureka.png` | Eureka dashboard showing all services `UP` (incl. 2 content-service instances) |
+| `grafana.png` | Grafana dashboard with request rate / circuit-breaker panels |
+| `prometheus-targets.png` | Prometheus → Status → Targets, all `UP` |
+| `swagger.png` | Swagger UI of one service |
+| `config-server.png` | `GET http://localhost:8888/content-service/default` JSON response |
+| `load-balancing.png` | Terminal output of the round-robin `instanceId` alternating |
+
+```markdown
+<!-- example, once the images exist:
+![Feed](docs/screenshots/feed.png)
+![Premium locked](docs/screenshots/premium-locked.png)
+-->
+```
+
+---
+
+## 12. AI in development
+
+This project was built using **Claude Code** as an AI pair-programmer, directed by the
+author. The working model was deliberate:
+
+- **The author (architect):** owned all architecture and design decisions — the
+  monolith-first strategy, service boundaries, schema-per-service, the gateway identity
+  mechanism (and its anti-spoofing requirement), the fail-closed vs fail-open trade-offs,
+  the config-server approach — and reviewed and validated every step. Major decisions
+  (repo structure, data strategy, identity propagation, sync-vs-event-driven) were made
+  by the author after the agent presented options and trade-offs.
+- **The AI (executor):** implemented the code under that direction, kept commits small
+  and conventional, ran builds/tests, verified behavior end-to-end (through the gateway,
+  in Docker), and maintained the design journal ([`CLAUDE.md`](CLAUDE.md)).
+
+**Benefits observed:** faster iteration, consistent structure across services, thorough
+inline documentation, and disciplined verification at each step (build → run → test →
+commit). Using AI agents effectively — keeping a human architect in the loop for
+decisions and review — is treated here as a modern engineering skill, not a shortcut.
+
+---
+
+## 13. Author & contributions
+
+**Carol** — sole author, architect and developer.
+
+As the single contributor, the author was responsible for the entire system: the
+architecture and all technical decisions, the monolith design and its decomposition
+into microservices, the data model, security, resilience and observability design, and
+the coordination of the implementation (see [AI in development](#12-ai-in-development)).
+The commit history reflects an incremental, phase-by-phase build (~69 commits).
+
+---
+
+## 14. Roadmap / next steps
+
+- **Distributed JWT** — replace gateway session-resolution with JWT validation (the
+  downstream header contract stays the same).
+- **Redis caching** — cache premium-gating results and cross-service display data.
+- **Dynamic config refresh** — a Git/filesystem config backend + `@RefreshScope` +
+  `/actuator/refresh` (or Spring Cloud Bus) for live config changes.
+- **Asynchronous messaging** — move notifications to a broker (RabbitMQ/Kafka) for a
+  fully event-driven, decoupled flow.
+- **Containerized frontend + live deployment** — serve the SPA through the gateway and
+  deploy the stack to a public host (with externalized, encrypted secrets).
+
+---
+
+*See [`CLAUDE.md`](CLAUDE.md) for the full design journal (§1–§23) and
+[`NEXT_STEPS.md`](NEXT_STEPS.md) for the phased build plan.*

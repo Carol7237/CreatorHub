@@ -1,0 +1,5 @@
+# Place screenshots referenced by README.md in this folder.
+# Recommended files (see the README "Screenshots" section):
+#   feed.png, login.png, premium-locked.png, post-detail.png,
+#   eureka.png, grafana.png, prometheus-targets.png, swagger.png,
+#   config-server.png, load-balancing.png
