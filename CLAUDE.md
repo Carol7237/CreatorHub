@@ -226,8 +226,16 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
     Validat în Docker: toate target-urile UP, metrici reale din trafic (request rate, latențe,
     JVM), și **starea circuit breaker** (`resilience4j_circuitbreaker_state`) trecând closed→open
     când subscription e oprit. Detalii §21.
-  - [ ] **Pasul 7+ — Config Server**, Redis (cache), JWT distribuit, containerizare frontend,
-    deploy. Vezi `NEXT_STEPS.md` §5.
+  - [x] **Pasul 7 — Config Server (Configurare Centralizată) (COMPLET, 2026-06-24):** bifează
+    cerința de configurare centralizată. Modul `services/config-server` (port **8888**, backend
+    **native** — fișiere în `config-repo/` din jar). Cele 5 servicii (user/subscription/content/
+    notification/gateway) importă config-ul cu **`spring.config.import=optional:configserver:...`**
+    (URL fix; `optional:` = pornesc și fără Config Server). Validat în Docker: `/content-service/default`
+    servește config; proprietate definită DOAR în Config Server (`creatorhub.config-source`) e activă în
+    serviciu (vizibilă prin gateway la `/api/content/instance`); gating + notificări neatinse; rularea
+    locală pornește și fără Config Server (fallback). Detalii §23.
+  - [ ] **Pasul 8+ — Redis (cache)**, JWT distribuit, containerizare frontend, deploy.
+    Vezi `NEXT_STEPS.md` §5.
 
 ## 6. Comenzi utile
 
@@ -1083,3 +1091,61 @@ for /l %i in (1,1,12) do curl -s http://localhost:8085/api/content/instance   # 
 
 ### Curățare
 `docker compose -f services/docker-compose.yml down` + `docker start creatorhub-postgres` (revine la dev local).
+
+## 23. Configurare Centralizată — Spring Cloud Config Server (cerință opțională)
+
+> Ramura `microservices`. Adăugat FĂRĂ a strica configurarea locală/Docker existentă (abordare
+> pragmatică: import `optional:` → serviciile pornesc și fără Config Server).
+
+### Config Server (`services/config-server`, port 8888, backend NATIVE)
+`@EnableConfigServer` + `spring-cloud-config-server`. Backend **native** (decizia: cel mai simplu,
+self-contained, fără repo Git separat): `spring.profiles.active=native` +
+`spring.cloud.config.server.native.search-locations=classpath:/config-repo/`. Fișierele de config
+sunt împachetate în jar la `config-repo/` (NU sub `classpath:/config/`, ca să nu fie încărcate ca
+config-ul PROPRIU al Boot-ului). Config Server-ul NU se înregistrează în Eureka — e găsit prin **URL fix**
+(decizia: robustețe > eleganța discovery-first). Actuator + micrometer (healthcheck + scrape Prometheus).
+
+### Ce config e centralizat (`config-repo/`)
+- `application.yml` (comun tuturor): `creatorhub.config-source` (**marker** care există DOAR aici → dovada
+  consumului), `management.endpoints...` (actuator/metrics), `spring.data.web.pageable.*`.
+- `<service>.yml` (per serviciu: user/subscription/content/notification/api-gateway): `creatorhub.service-note`.
+- **Config sensibil (DB creds/adrese):** rămâne externalizat prin profiluri + env vars Docker (deja externalizat),
+  ca serviciile să meargă și cu Config Server jos (`optional:`). *Notă:* într-un setup fail-fast ar sta aici,
+  criptat cu suportul `{cipher}` al Config Server-ului. (Pragmatic: nu rupem lanțul de override care merge.)
+
+### Cum se conectează serviciile (fixed URL + optional fallback)
+Fiecare din cele 5 servicii: `spring-cloud-starter-config` + în `application.yml`:
+`spring.config.import: "optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}"`.
+- **`optional:`** = dacă Config Server e indisponibil, serviciul tot pornește cu config-ul local (verificat).
+- **Docker:** env `CONFIG_SERVER_URL=http://config-server:8888`; **local:** default `http://localhost:8888`.
+- **Teste:** `spring.cloud.config.enabled=false` în profilul `test` (izolat, fără apel la Config Server).
+
+### Ordinea de pornire (Docker)
+`config-server` pornește devreme (independent, backend native, fără DB/Eureka); cele 5 servicii au
+`depends_on: config-server: condition: service_healthy` (healthcheck pe `/actuator/health`). Astfel la pornire
+serviciile găsesc deja Config Server-ul → preiau config-ul centralizat. (`optional:` rămâne plasa de siguranță.)
+
+### Refresh dinamic — NU implementat (documentat)
+Cu backend native classpath (config în jar) un refresh live n-ar fi demonstrabil (config-ul e „înghețat" în jar).
+E posibil cu backend Git/filesystem + `@RefreshScope` + `POST /actuator/refresh` (sau Spring Cloud Bus). Amânat
+intenționat ca să nu adăugăm risc/complexitate; mecanismul de bază (Config Server servește config) e complet.
+
+### PAȘI DE REPRODUCERE (demo live)
+```bash
+docker stop creatorhub-postgres
+docker compose -f services/docker-compose.yml up -d --build
+# 1) Config Server servește config (JSON cu propertySources):
+curl http://localhost:8888/content-service/default
+curl http://localhost:8888/user-service/default
+# 2) DOVADA că serviciul a consumat config-ul centralizat (proprietate doar-din-Config-Server):
+curl http://localhost:8085/api/content/instance      # -> "configSource":"Spring Cloud Config Server (centralized...)"
+```
+
+### Verificat (2026-06-24)
+- Build reactor verde (9 module, **68 teste**). Stivă Docker healthy incl. `config-server` (8888).
+- `/content-service/default` → 2 property sources (`content-service.yml` + `application.yml`) cu proprietățile.
+- **Consum dovedit:** `/api/content/instance` prin gateway → `configSource = "Spring Cloud Config Server
+  (centralized, native backend)"` (proprietate definită DOAR în Config Server).
+- **Nimic rupt:** gating inter-service (fan abonat vede premium / anonim locked), notificări (NEW_SUBSCRIBER +
+  NEW_COMMENT), totul OK. **Rularea locală pornește și FĂRĂ Config Server** (log: `Could not locate PropertySource
+  ... optional = true ... Connection refused` → `Started`). `docker compose down` curat.

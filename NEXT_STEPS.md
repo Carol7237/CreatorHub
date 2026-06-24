@@ -239,8 +239,20 @@ Commit-uri mici: `feat(eureka): ...`, `feat(gateway): ...`, `feat(probe): ...`.
    > - Endpoint demo `GET /api/content/instance` (instanceId per instanță). **12 cereri prin gateway →
    >   50/50 round-robin** între cele 2 instanțe. Bonus reziliență: o instanță oprită → cealaltă servește
    >   (7/8 OK, 1 tranzitoriu la evicție). Bifează cerința de Load Balancing (5%).
-3. **Config Server** (`spring-cloud-config-server`) — externalizează `application.yml`-urile
-   (porturi, datasource, secrete) într-un repo de config (Git sau `native`).
+
+   > ### ✅ CONFIG SERVER (Configurare Centralizată) — COMPLET (2026-06-24)
+   > Bifează cerința de configurare centralizată (4%). Detalii + reproducere: **CLAUDE.md §23**. Pe scurt:
+   > - **`config-server`** (port **8888**, backend **native** — fișiere `config-repo/` în jar, self-contained).
+   >   URL fix (nu discovery), actuator pt healthcheck/scrape.
+   > - Cele 5 servicii: `spring-cloud-starter-config` + `spring.config.import=optional:configserver:...`
+   >   (`optional:` = pornesc și fără Config Server — verificat). Docker: `CONFIG_SERVER_URL=config-server:8888`;
+   >   local: `localhost:8888`; test: `spring.cloud.config.enabled=false`.
+   > - Centralizat: marker `creatorhub.config-source` (doar în Config Server) + management/pageable + note per
+   >   serviciu. DB creds rămân externalizate prin env/profiluri (nu rupem override-ul; ar fi `{cipher}` în prod).
+   > - **Verificat:** `/content-service/default` servește config; `/api/content/instance` arată `configSource`
+   >   din Config Server; gating + notificări neatinse; local pornește și fără Config Server. Refresh dinamic: amânat.
+3. ~~**Config Server**~~ ✅ FĂCUT (vezi mai sus). `spring-cloud-config-server` — externalizează
+   `application.yml`-urile (porturi, datasource, secrete) într-un repo de config (Git sau `native`).
 4. **Resilience4j** pe apelurile cross-service (mai ales gating-ul premium): circuit
    breaker + retry + timeout + **fallback** (degradare grațioasă). Demonstrează cu un
    serviciu oprit → fallback, nu crash.

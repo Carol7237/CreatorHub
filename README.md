@@ -108,6 +108,29 @@ Both instances register in Eureka under `CONTENT-SERVICE` (check
 lets Docker Compose scale it. Stopping one instance leaves the other serving — the
 service stays available.)
 
+### Centralized configuration (Spring Cloud Config Server)
+
+A **Config Server** (`:8888`, native backend — config files bundled under
+`services/config-server/.../config-repo/`) serves centralized configuration to the
+services. Each service imports it at startup with
+`spring.config.import=optional:configserver:...`; the `optional:` prefix means a
+service **still starts on its local config if the Config Server is down**, so it
+never becomes a single point of failure.
+
+```bash
+# Config Server serves config as JSON:
+curl http://localhost:8888/content-service/default
+curl http://localhost:8888/user-service/default
+# Proof a service actually consumed it (a property defined ONLY in the Config Server):
+curl http://localhost:8085/api/content/instance
+#   -> "configSource":"Spring Cloud Config Server (centralized, native backend)"
+```
+
+Common settings (actuator/metrics exposure, pagination, a marker property) live in
+`application.yml`; per-service files (`<service>.yml`) add service-specific values.
+DB credentials stay externalized via Spring profiles + Docker env vars (in a
+production setup they would be centralized here, encrypted with `{cipher}`).
+
 ## Frontend (React SPA)
 
 A separate React + TypeScript + Vite app lives in [`frontend/`](frontend). It is
