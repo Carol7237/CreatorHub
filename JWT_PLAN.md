@@ -48,7 +48,15 @@ La FIECARE pas: cod → build → pornit → **verificat** (curl/browser) → co
 fiecare pas **re-confirmă că nu s-a rupt nimic** din ce mergea (gating premium, load
 balancing, notificări, Config Server). Vezi `CLAUDE.md` §18/§22 pentru cum se verifică.
 
-### PASUL 1 — User Service emite JWT la login
+### PASUL 1 — User Service emite JWT la login ✅ COMPLET (2026-06-25)
+> **Decizii confirmate:** access token HS256, expirare 2h, **fără refresh token**; cheie
+> simetrică. **Logica JWT într-un modul nou PUR `services/security-jwt`** (jjwt 0.12.6, zero
+> web) — refolosibil de gateway la Pasul 2 fără a importa `common` (care e servlet, iar gateway-ul
+> e reactiv). Login-ul întoarce `LoginResponse {token, type:"Bearer", expiresIn:7200, user}`;
+> claim-uri `sub=userId, username, roles[ROLE_], iat, exp`. **Sesiunea coexistă tranzitoriu.**
+> Cheia: `creatorhub.jwt.secret` (default DEV documentat + env `CREATORHUB_JWT_SECRET`). 75 teste
+> verzi; verificat la runtime (token decodat). **Detalii complete în `CLAUDE.md` §24.**
+
 - Adaugă o bibliotecă JWT (recomandat **`io.jsonwebtoken:jjwt`** — `jjwt-api` + `jjwt-impl`
   + `jjwt-jackson` runtime; versiune compatibilă cu Java 21). În `user-service`.
 - La `POST /api/auth/login` (după autentificarea reușită cu `AuthenticationManager` +

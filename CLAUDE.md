@@ -74,6 +74,13 @@ Spring Cloud. **Ambele sunt COMPLETE.**
 > să începi**. Se lucrează pe o **ramură NOUĂ `jwt-auth`** (din `microservices`); `main` +
 > `dev` + `microservices` rămân intacte ca backup (sistemul cu sesiune e în zona 10 — **NU-l
 > pierde**). Lecții de tooling (PowerShell etc.): **§3bis**.
+>
+> **🔑 JWT — STARE (pe ramura `jwt-auth`):** Decizii: **access token HS256 cu expirare
+> (2h), FĂRĂ refresh token**; cheie simetrică partajată. **Pasul 1 = COMPLET** (user-service
+> emite JWT la login; modul nou pur `services/security-jwt` cu jjwt; sesiunea coexistă
+> tranzitoriu). **Pasul 2** (gateway validează JWT) și **Pasul 3** (frontend pe gateway +
+> Bearer) = de făcut. Detalii: **§24**. `main`/`dev`/`microservices` rămân pe sesiune până
+> JWT e validat 100% end-to-end.
 
 ## 2. Stack tehnologic
 
@@ -289,7 +296,12 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
     servește config; proprietate definită DOAR în Config Server (`creatorhub.config-source`) e activă în
     serviciu (vizibilă prin gateway la `/api/content/instance`); gating + notificări neatinse; rularea
     locală pornește și fără Config Server (fallback). Detalii §23.
-  - [ ] **Pasul 8+ — Redis (cache)**, JWT distribuit, containerizare frontend, deploy.
+  - [~] **JWT distribuit (pe ramura `jwt-auth`, în curs):** access token **HS256** cu expirare
+    (2h), **fără refresh token**, cheie simetrică partajată. **Pasul 1 COMPLET (2026-06-25):**
+    user-service emite JWT la login printr-un **modul nou pur `services/security-jwt`** (jjwt,
+    refolosibil și de gateway la Pasul 2); sesiunea coexistă tranzitoriu. **75 teste verzi.**
+    Pasul 2 (gateway validează JWT) + Pasul 3 (frontend pe gateway + Bearer) rămân. Detalii §24.
+  - [ ] **Pasul 8+ — Redis (cache)**, containerizare frontend, deploy.
     Vezi `NEXT_STEPS.md` §5.
 
 ## 6. Comenzi utile
@@ -1204,3 +1216,63 @@ curl http://localhost:8085/api/content/instance      # -> "configSource":"Spring
 - **Nimic rupt:** gating inter-service (fan abonat vede premium / anonim locked), notificări (NEW_SUBSCRIBER +
   NEW_COMMENT), totul OK. **Rularea locală pornește și FĂRĂ Config Server** (log: `Could not locate PropertySource
   ... optional = true ... Connection refused` → `Started`). `docker compose down` curat.
+
+## 24. Securitate Avansată — JWT distribuit (cerință opțională) — RAMURA `jwt-auth`
+
+> **Ramură `jwt-auth`** (din `microservices`). `main`/`dev`/`microservices` rămân pe versiunea
+> cu **sesiune** ca backup curat până JWT e validat 100% end-to-end. Monolitul (`src/`) NEATINS.
+> Plan complet și pași: **[`JWT_PLAN.md`](JWT_PLAN.md)**. **Decizii (cu utilizatorul):** access
+> token **HS256** cu expirare (2h), **FĂRĂ refresh token** (la expirare → re-login); cheie
+> **simetrică partajată** (user-service semnează, gateway va valida cu același secret).
+
+### Decizia de design: modul nou pur `services/security-jwt` (NU în `common`, NU duplicat)
+„Pune logica JWT în `common`" **nu funcționează**: gateway-ul e **reactiv (WebFlux)** și NU
+poate importa `common` (trage servlet + Spring MVC: `spring-web`, `@RestControllerAdvice`,
+`HeaderAuthenticationFilter` servlet — vezi §18). Soluția aleasă (cu utilizatorul): **modul nou
+mic și PUR `services/security-jwt`**, cu **DOAR** `jjwt` (zero web/servlet/WebFlux), importabil
+de **AMBELE** — user-service (servlet, Pasul 1) ȘI gateway (reactiv, Pasul 2) — fără conflict și
+**fără duplicare**. Înregistrat în parent (`services/pom.xml`).
+
+- **Librăria:** `io.jsonwebtoken:jjwt` **0.12.6** (`jjwt-api` compile + `jjwt-impl`/`jjwt-jackson`
+  runtime). Versiune fixată în modul (jjwt NU e în BOM-ul Spring Boot). API 0.12.x: `Jwts.builder()`,
+  `signWith(key, Jwts.SIG.HS256)`, `Jwts.parser().verifyWith(key).build().parseSignedClaims(...)`.
+- **Pachet:** `com.creatorhub.security.jwt`. Clase: **`JwtService`** (POJO, constructor
+  `(String secret, long accessTokenValiditySeconds)`; `generateAccessToken(userId, username, roles)`,
+  `parse(token)` → `JwtPrincipal` / `tryParse(token)` → `Optional<JwtPrincipal>` null-safe pt gateway),
+  **`JwtPrincipal`** (record `userId, username, roles`). HS256 cere cheie ≥ 256 biți → `hmacShaKeyFor`
+  aruncă `WeakKeyException` la pornire dacă secretul e prea scurt (fail-fast). **6 unit tests** în modul
+  (round-trip, semnătură falsificată, cheie greșită, expirat, weak-secret).
+
+### Pasul 1 — User Service emite JWT la login (COMPLET, 2026-06-25)
+- **Token (claim-uri):** `sub` = **userId** (downstream lucrează cu userId), `username`,
+  `roles` (listă cu prefix **`ROLE_`**, ex. `["ROLE_ADMIN"]`), `iat`, `exp`. Header `{"alg":"HS256"}`.
+- **Răspunsul de login** (`POST /api/auth/login`) → DTO nou **`LoginResponse`**:
+  `{ "token": "<jwt>", "type": "Bearer", "expiresIn": 7200, "user": { ...UserResponse fără password... } }`.
+  (Înainte întorcea direct `UserResponse` — testul de login a fost adaptat: `$.user.username`.)
+- **Wiring:** `JwtConfig` (în user-service) construiește bean-ul `JwtService` din
+  `creatorhub.jwt.secret` + `creatorhub.jwt.access-token-validity-seconds` (`@Value`). Login-ul
+  refolosește **neschimbat** `AuthenticationManager` + BCrypt; ia `userId/username/roles` din
+  `Authentication` (principal = `SecurityUser`) și semnează token-ul.
+- **Cheia secretă (externalizată):** `creatorhub.jwt.secret` cu **default DEV documentat** în
+  `application.yml` (NU un secret real, ca remember-me key-ul), suprascris de **env
+  `CREATORHUB_JWT_SECRET`** (și `CREATORHUB_JWT_TTL_SECONDS` pt expirare). La Pasul 2 același
+  secret se va da și gateway-ului (ideal mutat în Config Server `config-repo/application.yml`
+  ca să fie partajat automat). Pus în `application.yml` de bază → disponibil și pe profilul `test`.
+- **COEXISTENȚĂ tranzitorie (sesiune + JWT):** în Pasul 1 login-ul **tot creează sesiune**
+  (+ remember-me) ȘI întoarce JWT, fiindcă **gateway-ul încă autentifică pe sesiune** (se schimbă
+  abia la Pasul 2). CSRF/sesiune/`/api/auth/me` rămân neatinse acum. Nicio tensiune — JWT e pur
+  aditiv. Curățarea sesiunii (→ `STATELESS`, CSRF off) se face la Pasul 2 când gateway-ul migrează.
+
+### Verificat (2026-06-25)
+- **Build reactor verde, 75 teste** (68 anterioare + 6 `JwtServiceTest` + 1 integration login JWT). `mvn clean install` OK; `security-jwt` instalat în `.m2`.
+- **Runtime (user-service direct pe :8092, profil dev, curl):** CSRF → `POST /api/auth/login`
+  (admin/admin123) → răspuns `type=Bearer`, `expiresIn=7200`, `user` fără `password`, **token JWT
+  cu 3 segmente**. **Payload decodat:** `{"sub":"1","username":"admin","roles":["ROLE_ADMIN"],"iat":...,"exp":...}`
+  (`exp−iat = 7200`). **Sesiunea coexistă:** `GET /api/auth/me` pe cookie (JSESSIONID) → userul admin (200).
+
+### Rămas (pe `jwt-auth`)
+- **Pasul 2:** `IdentityPropagationFilter` (gateway) validează `Authorization: Bearer <jwt>` (importă
+  `security-jwt`) în loc de `/api/auth/me` pe sesiune; injectează aceleași headere `X-User-*`; păstrează
+  anti-spoofing. Downstream NESCHIMBAT. Apoi user-service devine stateless.
+- **Pasul 3:** frontend rebranșat pe gateway (8085), `Authorization: Bearer`, fără CSRF/sesiune.
+- La final: docs + sincronizare `main`/`dev` cu `jwt-auth` (până atunci rămân pe sesiune).
