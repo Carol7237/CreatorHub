@@ -77,10 +77,12 @@ Spring Cloud. **Ambele sunt COMPLETE.**
 >
 > **🔑 JWT — STARE (pe ramura `jwt-auth`):** Decizii: **access token HS256 cu expirare
 > (2h), FĂRĂ refresh token**; cheie simetrică partajată. **Pasul 1 = COMPLET** (user-service
-> emite JWT la login; modul nou pur `services/security-jwt` cu jjwt; sesiunea coexistă
-> tranzitoriu). **Pasul 2** (gateway validează JWT) și **Pasul 3** (frontend pe gateway +
-> Bearer) = de făcut. Detalii: **§24**. `main`/`dev`/`microservices` rămân pe sesiune până
-> JWT e validat 100% end-to-end.
+> emite JWT la login; modul nou pur `services/security-jwt` cu jjwt). **Pasul 2 = COMPLET**
+> (gateway validează `Bearer <jwt>` și injectează `X-User-*`, anti-spoofing păstrat; user-service
+> devenit **STATELESS**, CSRF/sesiune scoase, `/me` pe headere; downstream NESCHIMBAT; cheie
+> partajată în Docker). **Backend-ul rulează acum 100% pe JWT.** **Pasul 3** (frontend pe gateway
+> + Bearer) = de făcut. Detalii: **§24**. `main`/`dev`/`microservices` rămân pe sesiune până
+> JWT e validat 100% end-to-end (inclusiv frontend).
 
 ## 2. Stack tehnologic
 
@@ -299,8 +301,10 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
   - [~] **JWT distribuit (pe ramura `jwt-auth`, în curs):** access token **HS256** cu expirare
     (2h), **fără refresh token**, cheie simetrică partajată. **Pasul 1 COMPLET (2026-06-25):**
     user-service emite JWT la login printr-un **modul nou pur `services/security-jwt`** (jjwt,
-    refolosibil și de gateway la Pasul 2); sesiunea coexistă tranzitoriu. **75 teste verzi.**
-    Pasul 2 (gateway validează JWT) + Pasul 3 (frontend pe gateway + Bearer) rămân. Detalii §24.
+    refolosibil de gateway). **Pasul 2 COMPLET (2026-06-25):** gateway validează `Bearer <jwt>` și
+    injectează `X-User-*` (anti-spoofing păstrat); user-service devenit **STATELESS** (CSRF/sesiune
+    scoase, `/me` pe headere); **downstream NESCHIMBAT**; cheie partajată în Docker. **Backend 100% JWT.**
+    **72 teste verzi.** Pasul 3 (frontend pe gateway + Bearer) rămâne. Detalii §24.
   - [ ] **Pasul 8+ — Redis (cache)**, containerizare frontend, deploy.
     Vezi `NEXT_STEPS.md` §5.
 
@@ -1270,9 +1274,35 @@ de **AMBELE** — user-service (servlet, Pasul 1) ȘI gateway (reactiv, Pasul 2)
   cu 3 segmente**. **Payload decodat:** `{"sub":"1","username":"admin","roles":["ROLE_ADMIN"],"iat":...,"exp":...}`
   (`exp−iat = 7200`). **Sesiunea coexistă:** `GET /api/auth/me` pe cookie (JSESSIONID) → userul admin (200).
 
+### Pasul 2 — Gateway validează JWT + user-service stateless (COMPLET, 2026-06-25)
+Sursa identității la gateway a trecut de la **sesiune** la **JWT**; restul lanțului e neschimbat.
+
+- **Gateway (`IdentityPropagationFilter` rescris):** importă `security-jwt` (curat — pur jjwt, fără
+  conflict servlet/WebFlux), citește `Authorization: Bearer <jwt>`, **validează HS256 + expirare** cu
+  `JwtService.tryParse` (sincron, CPU-bound — fără I/O blocant; **eliminat apelul WebClient la `/me`**,
+  `WebClientConfig` șters), și injectează `X-User-Id` / `X-User-Roles` (**comma-separated**, ROLE_-prefix)
+  / `X-User-Name` din claim-uri. **Anti-spoofing păstrat:** șterge orice `X-User-*` extern ÎNAINTE, deci
+  identitatea vine DOAR din token. Fără token / invalid / expirat → anonim (public merge, protejat → 401).
+  Cheia: `creatorhub.jwt.secret` (gateway `JwtConfig`), **identică** cu user-service (HS256 simetric).
+- **user-service → STATELESS (curățenie sesiune/CSRF):** `SecurityConfig` cu `SessionCreationPolicy.STATELESS`,
+  **CSRF dezactivat** (JWT în header Authorization nu e trimis automat de browser → nu e CSRF-prone),
+  `HeaderAuthenticationFilter` (din `common`) pentru endpoint-urile protejate — exact ca downstream.
+  **login** validează credențialele (BCrypt **neschimbat**) și întoarce JWT, **fără sesiune, fără CSRF**.
+  **`/api/auth/me`** rezolvă userul din identitatea injectată (principal = `Long userId`), nu din sesiune.
+  `CurrentUserService` citește principalul `Long`. **Șterse:** `CsrfCookieFilter`, `SpaCsrfTokenRequestHandler`,
+  endpoint-ul `/api/auth/csrf`, remember-me, `LoginRequest.rememberMe`. **Downstream NESCHIMBAT** (doar sursa
+  la gateway s-a schimbat). *Notă model de încredere: user-service acum se încrede în headerele `X-User-*` ca
+  toate serviciile downstream — sigure fiindcă gateway-ul e singura intrare și șterge copiile externe.*
+- **Docker:** `CREATORHUB_JWT_SECRET` setat **identic** pe user-service ȘI api-gateway în compose (cheie
+  simetrică partajată). Local: același default din `application.yml` pe ambele.
+
+**Verificat (2026-06-25, local prin gateway 8085):** **build reactor verde, 72 teste.** (1) login prin
+gateway **fără CSRF** → JWT; (2) `GET /api/auth/me` cu Bearer → 200; (3) fără token → **401**; (4) token
+invalid → **401**; (5) anti-spoof `X-User-Id` fals fără token → **401** (header șters); (6) anti-spoof token
+FAN valid + `X-User-Id:1`/`ROLE_ADMIN` fals → identitatea folosită = **FAN** (nu admin); (7) FAN + `ROLE_ADMIN`
+fals pe `/api/admin/users` → **403** (rolurile vin din JWT); (8) **gating inter-service cu JWT:** anonim →
+premium **locked**, FAN abonat (Bearer) → **body vizibil**. Downstream (subscription/content) neatins.
+
 ### Rămas (pe `jwt-auth`)
-- **Pasul 2:** `IdentityPropagationFilter` (gateway) validează `Authorization: Bearer <jwt>` (importă
-  `security-jwt`) în loc de `/api/auth/me` pe sesiune; injectează aceleași headere `X-User-*`; păstrează
-  anti-spoofing. Downstream NESCHIMBAT. Apoi user-service devine stateless.
 - **Pasul 3:** frontend rebranșat pe gateway (8085), `Authorization: Bearer`, fără CSRF/sesiune.
 - La final: docs + sincronizare `main`/`dev` cu `jwt-auth` (până atunci rămân pe sesiune).

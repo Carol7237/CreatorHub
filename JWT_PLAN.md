@@ -74,7 +74,16 @@ balancing, notificări, Config Server). Vezi `CLAUDE.md` §18/§22 pentru cum se
   conține un JWT. Decodează-l (jwt.io sau în cod) și confirmă claim-urile (userId, roles, exp).
   `register`/BCrypt/`/api/auth/me` încă merg.
 
-### PASUL 2 — Gateway validează JWT și injectează identitatea (în loc de sesiune)
+### PASUL 2 — Gateway validează JWT și injectează identitatea ✅ COMPLET (2026-06-25)
+> Gateway-ul importă `security-jwt` (curat, fără conflict WebFlux), `IdentityPropagationFilter`
+> validează `Authorization: Bearer <jwt>` (HS256 + expirare) și injectează `X-User-*` (roluri
+> comma-separated) — **eliminat apelul la `/api/auth/me`** (+ `WebClientConfig`). **Anti-spoofing
+> păstrat.** user-service trecut **STATELESS** (CSRF/sesiune/remember-me scoase, `/me` pe headere,
+> `CurrentUserService` pe principal `Long`). **Downstream NESCHIMBAT.** Cheie `CREATORHUB_JWT_SECRET`
+> identică pe gateway+user-service (Docker + default local). **72 teste verzi.** Verificat local prin
+> gateway: login fără CSRF→JWT, Bearer→200, fără/invalid token→401, anti-spoof (header fals ignorat,
+> JWT învinge), gating inter-service cu JWT. **Detalii complete în `CLAUDE.md` §24.**
+
 - Modifică **`IdentityPropagationFilter`** din `api-gateway`: în loc să apeleze
   `user-service /api/auth/me` pe baza cookie-ului de sesiune, citește header-ul
   **`Authorization: Bearer <jwt>`**, **validează semnătura + expirarea** (cu aceeași cheie
