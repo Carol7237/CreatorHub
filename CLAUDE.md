@@ -15,22 +15,65 @@ Proiect de facultate (Aplicații Web cu Arhitectură de Microservicii), construi
 la **calitate de producție** fiindcă va deveni un produs real.
 
 **Strategie: monolit întâi, microservicii la final.** Am construit mai întâi un
-monolit Spring Boot curat și bine structurat; acum urmează spargerea în
-microservicii.
+monolit Spring Boot curat și bine structurat, apoi l-am spart în microservicii
+Spring Cloud. **Ambele sunt COMPLETE.**
 
-> ## ⭐ STARE CURENTĂ (handoff — citește asta primul)
-> **Monolitul Spring Boot e COMPLET și funcțional pe ramura `main`**, working tree
-> curat. Toate cele **8 cerințe obligatorii** sunt livrate (model JPA, CRUD+service
-> layer, multi-environment, Spring Security, paginare/sortare+logging, testare,
-> REST API+validare, frontend React) — **~60% din notă livrat**. **105 teste verzi**
-> pe H2 (`./mvnw clean verify`), coverage service **87% line**. Frontend React (SPA
-> cyberpunk) în `/frontend`, verificat end-to-end.
+> ## ⭐ STARE CURENTĂ (handoff — citește asta primul) — actualizat 2026-06-24
 >
-> **Următorul pas = Faza 8: microservicii (Spring Cloud), țintă notă 8–9.** Planul
-> complet, incremental, e în **[`NEXT_STEPS.md`](NEXT_STEPS.md)** — citește-l înainte
-> să începi. Microserviciile se construiesc pe o **ramură nouă `microservices`**
-> (NU pe `main`); monolitul de pe `main` rămâne intact ca backup. **Nu sparge
-> monolitul de pe `main`.**
+> **TOTUL E COMPLET ȘI FUNCȚIONAL. Working tree curat. ~70 commits, totul pe GitHub.**
+> Ramura de lucru curentă = **`microservices`**. `main` + `dev` + `microservices` sunt
+> **sincronizate** pe GitHub: <https://github.com/Carol7237/CreatorHub> (repo public,
+> `main` = proiectul complet, `dev` = ramură de lucru).
+>
+> ### Ce e livrat
+> - **Monolitul Spring Boot** (în `src/` + root `pom.xml`, pe toate ramurile): cele 8
+>   cerințe obligatorii (model JPA, CRUD+service layer, multi-env, Spring Security,
+>   paginare/sortare+logging, testare, REST+validare, **frontend React** în `/frontend`).
+>   **105 teste verzi**, coverage service **~87%**. Rulează pe **:8081** (profil dev).
+> - **Microserviciile Spring Cloud** (în `services/`, multi-module Maven): Eureka,
+>   API Gateway, **Config Server**, 4 servicii de business (User/Subscription/Content/
+>   Notification), **PostgreSQL schema-per-service** + **MongoDB** (notificări),
+>   **Prometheus + Grafana**, **Resilience4j circuit breaker**, **load balancing
+>   demonstrat** (2 instanțe, round-robin). **68 teste verzi.** Toți pașii §16–§23.
+> - Cerințe opționale bifate: Config Server (§23), Eureka/Gateway (§16), Load Balancing
+>   (§22), Resilience4j (§18), Monitoring (§21), NoSQL/Mongo (§20). Detalii pe pași: §16–§23.
+>
+> ### Porturi (importante)
+> Gateway **8085** · Eureka **8761** · Config Server **8888** · user-service **8092** ·
+> subscription **8093** · content **8094** · notification **8095** · Prometheus **9090** ·
+> Grafana **3000** · PostgreSQL **5433** (host→5432) · MongoDB **27018** stack /
+> **27017** nativ · monolit **8081** · frontend Vite **5173**.
+> **Credențiale dev:** admin app **`admin`/`admin123`** · Grafana **`admin`/`admin`** ·
+> DB **`creatorhub`/`creatorhub`**.
+>
+> ### 🔐 ARHITECTURA DE SECURITATE ACTUALĂ (CRUCIAL — JWT o va modifica)
+> - **Monolit + user-service:** autentificare din DB, **pe sesiune** (cookie `JSESSIONID`),
+>   **BCrypt**, **CSRF** cookie-based (SPA-ready, `X-XSRF-TOKEN`), roluri USER/ADMIN,
+>   remember-me. `CustomUserDetailsService` + `PasswordEncoder` (BCrypt) = fundația
+>   **refolosibilă pentru JWT**. Detalii: **§11** (monolit), **§17** (user-service).
+> - **Microservicii (identitate distribuită):** **gateway-ul e singura sursă de adevăr**.
+>   `IdentityPropagationFilter` (în api-gateway): (1) **șterge** orice `X-User-*` extern
+>   (anti-spoofing), (2) rezolvă sesiunea apelând `user-service /api/auth/me` (WebClient
+>   `@LoadBalanced`), (3) injectează headere de încredere **`X-User-Id` / `X-User-Roles`
+>   (prefix `ROLE_`) / `X-User-Name`**. Serviciile downstream sunt **stateless** (CSRF off)
+>   cu **`HeaderAuthenticationFilter`** (header→`SecurityContext`) + **`CurrentViewerService`**
+>   (în modulul **`common`**). Detalii: **§18**.
+> - **PENTRU JWT (next step):** se schimbă DOAR sursa identității la gateway — în loc să
+>   apeleze `/api/auth/me` pe sesiune, gateway-ul **validează un JWT** și injectează aceleași
+>   headere `X-User-*` → **serviciile downstream NU se schimbă** (`HeaderAuthenticationFilter`
+>   se refolosește neschimbat). Vezi **`JWT_PLAN.md`**.
+>
+> ### Frontend (atenție pt JWT)
+> SPA React+TS+Vite în `/frontend` (§15): `src/api/client.ts` (axios + interceptor **CSRF**),
+> `src/auth/AuthContext.tsx` (login/register/logout **pe sesiune**). **Frontend-ul lovește
+> ACUM MONOLITUL pe `:8081`** (Vite proxy `/api`→8081), NU gateway-ul. La JWT trebuie
+> **rebranșat pe gateway (8085)** + trecut de la CSRF/sesiune la `Authorization: Bearer <jwt>`.
+>
+> ### Următorul pas = **JWT distribuit în TOT sistemul** (backend microservicii + frontend)
+> Planul complet, incremental, e în **[`JWT_PLAN.md`](JWT_PLAN.md)** — **citește-l înainte
+> să începi**. Se lucrează pe o **ramură NOUĂ `jwt-auth`** (din `microservices`); `main` +
+> `dev` + `microservices` rămân intacte ca backup (sistemul cu sesiune e în zona 10 — **NU-l
+> pierde**). Lecții de tooling (PowerShell etc.): **§3bis**.
 
 ## 2. Stack tehnologic
 
@@ -107,6 +150,18 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
   în fundal cu redirect la log, apoi poll pe `Started CreatorHubApplication`.
 - **Preview UI:** `.claude/launch.json` + tool-ul de preview pe portul 5173 (oprește
   întâi Vite-ul pornit manual ca să elibereze portul).
+- **PowerShell 5.1 NU are operatorul ternar** (`a ? b : c`) — e eroare de parsare (și
+  scriptul nu rulează DELOC). Folosește `if/else`.
+- **Gateway: ~30s după pornire** până-și împrospătează registry-ul Eureka — primele cereri
+  prin gateway pot da **503** (no instances) până vede serviciile, apoi 200. Fă poll/retry.
+- **Conflicte de port Docker:** stiva (`services/docker-compose.yml`) are propriul **Postgres
+  pe 5433** și **Mongo pe 27018** (există un `mongod` NATIV pe 27017). Înainte de `up` pe stivă:
+  `docker stop creatorhub-postgres` (Postgres-ul standalone, tot 5433). Containere orfane
+  (`creatorhub-mongo` etc.) de la rulări vechi → `docker compose down` + pornire curată.
+- **`docker compose --scale <svc>=N`** cere ca serviciul să NU aibă `container_name` fix și
+  NICIUN port pe host (altfel conflict). content-service e configurat exact așa (vezi §22).
+- **Build/teste:** `./mvnw -f services/pom.xml clean install` (din rădăcină, wrapper-ul
+  monolitului). Docker: `docker compose -f services/docker-compose.yml up -d --build`.
 
 ## 4. Convenții de cod
 
