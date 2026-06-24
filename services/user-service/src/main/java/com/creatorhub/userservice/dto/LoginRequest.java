@@ -17,7 +17,4 @@ public class LoginRequest {
 
     @NotBlank(message = "Password is required")
     private String password;
-
-    /** When true, issues a token-based remember-me cookie. */
-    private boolean rememberMe;
 }

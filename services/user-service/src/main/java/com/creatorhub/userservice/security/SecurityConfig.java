@@ -1,6 +1,6 @@
 package com.creatorhub.userservice.security;
 
-import jakarta.servlet.http.HttpServletResponse;
+import com.creatorhub.common.security.HeaderAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,33 +10,31 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.RememberMeServices;
-import org.springframework.security.web.authentication.rememberme.TokenBasedRememberMeServices;
-import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
-import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
-import org.springframework.security.web.context.SecurityContextRepository;
-import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-
-import java.util.List;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * Session-based security for the User Service, migrated unchanged in spirit from
- * the monolith: CSRF stays active (cookie-based), passwords are BCrypt-encoded,
- * authorization is by URL pattern + roles, remember-me is token-based.
+ * Stateless, JWT-era security for the User Service (Step 2). Authentication has two halves:
  *
- * <p>Requests normally arrive through the API gateway; the gateway transparently
- * relays the session + XSRF cookies, so the same CSRF flow works end-to-end.
+ * <ul>
+ *   <li><b>Login</b> ({@code /api/auth/login}, public) validates username/password with
+ *       {@link CustomUserDetailsService} + BCrypt (reused unchanged) and returns a signed
+ *       JWT. No session is created and NO CSRF token is required: a JWT travels in the
+ *       {@code Authorization} header, which the browser does not send automatically, so it
+ *       is not vulnerable to CSRF the way an ambient session cookie is.</li>
+ *   <li><b>Protected endpoints</b> ({@code /api/auth/me}, {@code /api/admin/**}) are
+ *       authenticated from the gateway-injected identity headers via
+ *       {@link HeaderAuthenticationFilter} — exactly like the other downstream services.
+ *       The principal is the user's id (a {@code Long}).</li>
+ * </ul>
  *
- * <p>JWT note: at a later step a JWT filter is added on top of this, reusing
- * {@link CustomUserDetailsService} and the {@link PasswordEncoder} unchanged; only
- * the session bits become stateless.
+ * <p>This replaces the previous session + CSRF + remember-me setup: the gateway no longer
+ * depends on a session (it validates the JWT and injects the trusted {@code X-User-*}
+ * headers). Like the downstream services, identity headers are trusted because the gateway
+ * is the only ingress and strips any client-supplied copies.
  */
 @Configuration
 @EnableWebSecurity
@@ -44,13 +42,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    /** Dev/test key for signing remember-me tokens; externalize a real secret for production. */
-    static final String REMEMBER_ME_KEY = "creatorhub-remember-me-key-CHANGE-IN-PROD";
-
-    /** Dev front-end origins (Vite / CRA). Restrict to the real domain in production. */
-    private static final List<String> ALLOWED_ORIGINS = List.of("http://localhost:5173", "http://localhost:3000");
-
-    private final CustomUserDetailsService userDetailsService;
     private final RestAuthenticationEntryPoint authenticationEntryPoint;
     private final RestAccessDeniedHandler accessDeniedHandler;
 
@@ -65,71 +56,29 @@ public class SecurityConfig {
     }
 
     @Bean
-    SecurityContextRepository securityContextRepository() {
-        return new HttpSessionSecurityContextRepository();
-    }
-
-    @Bean
-    RememberMeServices rememberMeServices(UserDetailsService uds) {
-        TokenBasedRememberMeServices services = new TokenBasedRememberMeServices(REMEMBER_ME_KEY, uds);
-        services.setParameter("remember-me");
-        services.setTokenValiditySeconds(14 * 24 * 60 * 60); // 14 days
-        return services;
-    }
-
-    @Bean
-    CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(ALLOWED_ORIGINS);
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
-        // Allow cookies (JSESSIONID + XSRF-TOKEN) on cross-origin requests for the SPA.
-        config.setAllowCredentials(true);
-        config.setExposedHeaders(List.of("Location"));
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
-        return source;
-    }
-
-    @Bean
-    SecurityFilterChain filterChain(HttpSecurity http,
-                                    RememberMeServices rememberMeServices,
-                                    SecurityContextRepository securityContextRepository,
-                                    CorsConfigurationSource corsConfigurationSource) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource))
-                // Stateful session auth (no httpBasic / no Spring formLogin: login is a REST endpoint).
-                .csrf(csrf -> csrf
-                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-                        .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler()))
-                .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
+                // Stateless JWT auth: no session, no CSRF (token is in the Authorization header).
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // Identity from the gateway-injected X-User-* headers (same as downstream services).
+                .addFilterBefore(new HeaderAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
                         // CORS preflight.
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // API docs (Swagger UI) + error — dev convenience.
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs/**", "/v3/api-docs.yaml", "/error").permitAll()
-                        // Public auth endpoints (register/login + CSRF token bootstrap).
-                        .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/csrf").permitAll()
-                        // Public reads (browsing creators, public profiles). Premium-content
-                        // gating is enforced in the Content service, not by URL here.
+                        // Public auth endpoints (register + login). No CSRF bootstrap needed anymore.
+                        .requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
+                        // Public reads (browse creators, public profiles).
                         .requestMatchers(HttpMethod.GET, "/api/creators/**", "/api/profiles/**").permitAll()
                         // Admin-only area.
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        // Any other API endpoint requires authentication.
+                        // Any other API endpoint requires an authenticated identity.
                         .requestMatchers("/api/**").authenticated()
                         // No sensitive endpoint lives outside /api; leave the rest open.
                         .anyRequest().permitAll())
-                .securityContext(sc -> sc.securityContextRepository(securityContextRepository))
-                .rememberMe(rm -> rm
-                        .key(REMEMBER_ME_KEY)
-                        .rememberMeServices(rememberMeServices))
-                .logout(logout -> logout
-                        .logoutUrl("/api/auth/logout")
-                        .logoutSuccessHandler((req, res, auth) -> res.setStatus(HttpServletResponse.SC_OK))
-                        .invalidateHttpSession(true)
-                        .clearAuthentication(true)
-                        .deleteCookies("JSESSIONID", "remember-me"))
                 .exceptionHandling(eh -> eh
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler));
