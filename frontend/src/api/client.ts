@@ -1,50 +1,41 @@
 import axios, { AxiosError } from 'axios';
 import type { ApiErrorResponse } from '../types';
+import { clearToken, getToken } from '../auth/token';
 
 /**
- * Axios instance. Same-origin in dev via the Vite proxy (/api -> :8081), so
- * session + XSRF-TOKEN cookies flow and JS can read the CSRF cookie.
+ * Axios instance. In dev, /api is proxied to the API gateway (:8085 — see
+ * vite.config.ts). Authentication is stateless JWT: the access token travels in the
+ * Authorization header, so there are no cookies and no CSRF (withCredentials is not
+ * needed).
  */
 export const api = axios.create({
   baseURL: '/',
-  withCredentials: true,
 });
 
-function readCookie(name: string): string | undefined {
-  return document.cookie
-    .split('; ')
-    .find((c) => c.startsWith(name + '='))
-    ?.split('=')[1];
-}
-
-let csrfPrimed = false;
-
-/** Ensure the XSRF-TOKEN cookie exists (any GET through the chain sets it). */
-async function ensureCsrf(): Promise<void> {
-  if (csrfPrimed || readCookie('XSRF-TOKEN')) {
-    csrfPrimed = true;
-    return;
-  }
-  try {
-    await api.get('/api/auth/csrf');
-  } catch {
-    /* ignore — the cookie filter still sets it */
-  }
-  csrfPrimed = true;
-}
-
-// Attach the CSRF token to state-changing requests.
-api.interceptors.request.use(async (config) => {
-  const method = (config.method ?? 'get').toLowerCase();
-  if (['post', 'put', 'patch', 'delete'].includes(method)) {
-    await ensureCsrf();
-    const token = readCookie('XSRF-TOKEN');
-    if (token) {
-      config.headers.set('X-XSRF-TOKEN', decodeURIComponent(token));
-    }
+// Attach the JWT as a Bearer token on every request, when one is stored.
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers.set('Authorization', `Bearer ${token}`);
   }
   return config;
 });
+
+// On a 401 WITH a stored token, the token is invalid/expired (there is no refresh
+// token): clear it and send the user back to login to re-authenticate. A 401 WITHOUT
+// a token (e.g. a wrong-password login attempt) is left for the caller to handle.
+api.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError) => {
+    if (error.response?.status === 401 && getToken()) {
+      clearToken();
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login');
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 
 /** Normalizes an axios error to the backend ApiErrorResponse shape. */
 export function toApiError(err: unknown): ApiErrorResponse {
