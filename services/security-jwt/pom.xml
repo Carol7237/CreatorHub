@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.creatorhub</groupId>
+        <artifactId>creatorhub-services</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>security-jwt</artifactId>
+    <name>CreatorHub Security JWT</name>
+    <description>Pure, framework-agnostic JWT utility (HS256 sign + validate) shared by
+        the User Service (servlet) and the API Gateway (reactive/WebFlux). Deliberately
+        depends ONLY on jjwt — NO spring-web, servlet or WebFlux — so both a servlet and
+        a reactive module can import it without dragging in conflicting web stacks
+        (which is exactly why the gateway cannot import `common`).</description>
+
+    <properties>
+        <!-- jjwt is NOT managed by the Spring Boot BOM, so pin it here.
+             0.12.x is the current API (verifyWith / parseSignedClaims / Jwts.SIG). -->
+        <jjwt.version>0.12.6</jjwt.version>
+    </properties>
+
+    <!-- Plain library jar (no Spring Boot repackage), like `common`. -->
+    <dependencies>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>${jjwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- JSON (de)serialization of claims via Jackson (jackson version comes from the BOM). -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Test only (versions managed by the Spring Boot BOM). -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

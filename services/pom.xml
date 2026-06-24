@@ -33,6 +33,10 @@
          UNTOUCHED and is intentionally NOT a module here (see NEXT_STEPS.md). -->
     <modules>
         <module>common</module>
+        <!-- Pure JWT utility (jjwt only) shared by user-service (servlet) and the
+             reactive gateway. Kept separate from `common` precisely so the gateway
+             can import it without pulling in servlet/web-MVC. -->
+        <module>security-jwt</module>
         <module>eureka-server</module>
         <module>config-server</module>
         <module>api-gateway</module>
