@@ -38,8 +38,14 @@ class JwtServiceTest {
     @DisplayName("tampered signature is rejected")
     void parse_tamperedSignature_rejected() {
         String token = jwt.generateAccessToken(1L, "bob", List.of("ROLE_USER"));
-        char last = token.charAt(token.length() - 1);
-        String tampered = token.substring(0, token.length() - 1) + (last == 'a' ? 'b' : 'a');
+        // Flip the FIRST character of the signature segment. Unlike the last base64url
+        // char (which only carries 4 significant bits, so some flips are a no-op on the
+        // decoded bytes), the first char's 6 bits are always significant -> the decoded
+        // signature is guaranteed to differ, so validation must reject it deterministically.
+        String[] parts = token.split("\\.");
+        char first = parts[2].charAt(0);
+        parts[2] = (first == 'A' ? 'B' : 'A') + parts[2].substring(1);
+        String tampered = parts[0] + "." + parts[1] + "." + parts[2];
 
         assertThatThrownBy(() -> jwt.parse(tampered)).isInstanceOf(JwtException.class);
         assertThat(jwt.tryParse(tampered)).isEmpty();
