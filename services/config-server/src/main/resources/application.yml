@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: config-server
+  # Native backend: serve config files from the bundled config-repo/ folder
+  # (no external Git repo needed — self-contained and easy to demonstrate).
+  profiles:
+    active: native
+  cloud:
+    config:
+      server:
+        native:
+          search-locations: classpath:/config-repo/
+
+server:
+  port: 8888
+
+# Monitoring + healthcheck.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      application: ${spring.application.name}

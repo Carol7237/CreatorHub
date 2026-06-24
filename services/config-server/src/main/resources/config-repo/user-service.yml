@@ -1,0 +1,3 @@
+# Centralized config specific to user-service (file name = spring.application.name).
+creatorhub:
+  service-note: "user-service configuration is served by the Config Server"

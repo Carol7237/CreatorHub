@@ -1,0 +1,30 @@
+# Centralized COMMON configuration — served by the Config Server to EVERY service
+# (file name `application` = applies to all). The `creatorhub.config-source` marker
+# exists ONLY here, so a service reporting it proves the config came from the server.
+creatorhub:
+  config-source: "Spring Cloud Config Server (centralized, native backend)"
+
+# Actuator/metrics exposure, centralized for all services (also kept locally as a
+# fallback for when the Config Server is not reachable — see `optional:` import).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# Common pagination defaults.
+spring:
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+        one-indexed-parameters: false
+
+# NOTE on sensitive config: DB credentials/addresses stay externalized via Spring
+# profiles + Docker env vars (already the case) so services keep working even with
+# the Config Server down (`optional:`). In a fail-fast production setup they would
+# live here, encrypted with Config Server's `{cipher}` support.
