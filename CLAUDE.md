@@ -161,6 +161,9 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
   întâi Vite-ul pornit manual ca să elibereze portul).
 - **PowerShell 5.1 NU are operatorul ternar** (`a ? b : c`) — e eroare de parsare (și
   scriptul nu rulează DELOC). Folosește `if/else`.
+- **Variabilele PowerShell sunt case-INSENSITIVE:** `$fan` și `$FAN` sunt ACEEAȘI variabilă
+  (a doua o suprascrie pe prima — bug subtil în scripturile de verificare). Folosește nume
+  distincte ca litere, nu doar ca majuscule (ex. `$fanName` vs `$fanToken`).
 - **Gateway: ~30s după pornire** până-și împrospătează registry-ul Eureka — primele cereri
   prin gateway pot da **503** (no instances) până vede serviciile, apoi 200. Fă poll/retry.
 - **Conflicte de port Docker:** stiva (`services/docker-compose.yml`) are propriul **Postgres
