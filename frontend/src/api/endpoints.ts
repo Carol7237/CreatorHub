@@ -1,6 +1,7 @@
 import { api } from './client';
 import type {
   CommentResponse,
+  LoginResponse,
   PagedResponse,
   PostResponse,
   ProfileResponse,
@@ -11,12 +12,13 @@ import type {
 
 // ---- auth ----
 export interface RegisterPayload { username: string; email: string; password: string; displayName?: string; }
-export interface LoginPayload { username: string; password: string; rememberMe?: boolean; }
+export interface LoginPayload { username: string; password: string; }
 
 export const authApi = {
   register: (p: RegisterPayload) => api.post<UserResponse>('/api/auth/register', p).then((r) => r.data),
-  login: (p: LoginPayload) => api.post<UserResponse>('/api/auth/login', p).then((r) => r.data),
-  logout: () => api.post('/api/auth/logout').then(() => undefined),
+  // Returns the signed JWT (+ user); the AuthContext stores the token. Logout is
+  // purely client-side (clear the token) — JWT is stateless, no server call.
+  login: (p: LoginPayload) => api.post<LoginResponse>('/api/auth/login', p).then((r) => r.data),
   me: () => api.get<UserResponse>('/api/auth/me').then((r) => r.data),
 };
 
@@ -34,13 +36,17 @@ export const postApi = {
 };
 
 // ---- creators ----
+// In the microservices split the per-creator sub-resources moved off user-service:
+// posts -> content-service (GET /api/posts?creatorId=), tiers -> subscription-service
+// (GET /api/tiers?creatorId=). The gateway routes those paths accordingly.
 export const creatorApi = {
   list: (page = 0, size = 12) =>
     api.get<PagedResponse<UserResponse>>('/api/creators', { params: { page, size } }).then((r) => r.data),
   get: (id: number) => api.get<UserResponse>(`/api/creators/${id}`).then((r) => r.data),
   posts: (id: number, page = 0, size = 12, sort = 'createdAt,desc') =>
-    api.get<PagedResponse<PostResponse>>(`/api/creators/${id}/posts`, { params: { page, size, sort } }).then((r) => r.data),
-  tiers: (id: number) => api.get<SubscriptionTierResponse[]>(`/api/creators/${id}/tiers`).then((r) => r.data),
+    api.get<PagedResponse<PostResponse>>('/api/posts', { params: { creatorId: id, page, size, sort } }).then((r) => r.data),
+  tiers: (id: number) =>
+    api.get<SubscriptionTierResponse[]>('/api/tiers', { params: { creatorId: id } }).then((r) => r.data),
 };
 
 // ---- profiles ----

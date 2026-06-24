@@ -32,9 +32,9 @@ export function PostCard({ post }: { post: PostResponse }) {
     >
       <header className="post-head" onClick={(e) => e.stopPropagation()}>
         <Link to={`/creators/${post.creatorId}`} className="post-author">
-          <Avatar name={post.creatorUsername} />
+          <Avatar name={post.creatorUsername ?? `creator-${post.creatorId}`} />
           <div>
-            <div className="post-author-name">@{post.creatorUsername}</div>
+            <div className="post-author-name">@{post.creatorUsername ?? `creator-${post.creatorId}`}</div>
             <div className="muted post-time">{timeAgo(post.createdAt)}</div>
           </div>
         </Link>

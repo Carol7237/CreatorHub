@@ -47,9 +47,9 @@ export function PostDetailPage() {
       <article className="card post-detail">
         <header className="between">
           <Link to={`/creators/${p.creatorId}`} className="row" style={{ gap: '0.7rem' }}>
-            <Avatar name={p.creatorUsername} />
+            <Avatar name={p.creatorUsername ?? `creator-${p.creatorId}`} />
             <div>
-              <div style={{ fontWeight: 600, color: 'var(--text)' }}>@{p.creatorUsername}</div>
+              <div style={{ fontWeight: 600, color: 'var(--text)' }}>@{p.creatorUsername ?? `creator-${p.creatorId}`}</div>
               <div className="muted" style={{ fontSize: '0.8rem' }}>{new Date(p.createdAt).toLocaleString()}</div>
             </div>
           </Link>
@@ -116,10 +116,10 @@ export function PostDetailPage() {
             {comments.data.map((c) => (
               <motion.div key={c.id} className="comment card" variants={listItem}>
                 <div className="row" style={{ gap: '0.6rem' }}>
-                  <Avatar name={c.authorUsername} />
+                  <Avatar name={c.authorUsername ?? `user-${c.authorId}`} />
                   <div style={{ flex: 1 }}>
                     <div className="between">
-                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>@{c.authorUsername}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>@{c.authorUsername ?? `user-${c.authorId}`}</span>
                       <span className="muted" style={{ fontSize: '0.75rem' }}>{new Date(c.createdAt).toLocaleDateString()}</span>
                     </div>
                     <p style={{ marginTop: '0.2rem' }}>{c.text}</p>

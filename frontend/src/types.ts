@@ -13,6 +13,14 @@ export interface UserResponse {
   displayName: string | null;
 }
 
+/** Login result: the signed JWT access token plus the authenticated user. */
+export interface LoginResponse {
+  token: string;
+  type: string;       // "Bearer"
+  expiresIn: number;  // seconds
+  user: UserResponse;
+}
+
 export interface ProfileResponse {
   id: number;
   displayName: string;
@@ -21,6 +29,9 @@ export interface ProfileResponse {
   userId: number;
 }
 
+// NOTE: cross-service "display" fields (a user's username looked up from another
+// service) are NOT returned by the microservices — only the ids are (see CLAUDE.md
+// §18). They are marked optional here and the UI falls back to the id.
 export interface PostResponse {
   id: number;
   title: string;
@@ -29,9 +40,9 @@ export interface PostResponse {
   locked: boolean;
   createdAt: string;
   creatorId: number;
-  creatorUsername: string;
+  creatorUsername?: string | null; // cross-service: not returned by content-service
   tierId?: number | null;
-  tierName?: string | null;
+  tierName?: string | null;        // cross-service
   tags: string[];
 }
 
@@ -41,15 +52,15 @@ export interface SubscriptionTierResponse {
   priceMonthly: number;
   perks: string | null;
   creatorId: number;
-  creatorUsername: string;
+  creatorUsername?: string | null; // cross-service
 }
 
 export interface SubscriptionResponse {
   id: number;
   fanId: number;
-  fanUsername: string;
+  fanUsername?: string | null; // cross-service
   tierId: number;
-  tierName: string;
+  tierName: string;            // tier is local to subscription-service -> returned
   creatorId: number;
   startDate: string;
   status: SubStatus;
@@ -61,7 +72,7 @@ export interface CommentResponse {
   createdAt: string;
   postId: number;
   authorId: number;
-  authorUsername: string;
+  authorUsername?: string | null; // cross-service
 }
 
 export interface TagResponse {

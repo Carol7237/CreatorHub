@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { authApi, type LoginPayload, type RegisterPayload } from '../api/endpoints';
+import { clearToken, getToken, setToken } from './token';
 import type { UserResponse } from '../types';
 
 interface AuthState {
@@ -27,12 +28,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    // Restore the session on load only if a JWT is stored; /me confirms it (or the
+    // 401 interceptor clears an expired token). No token -> stay anonymous.
+    if (!getToken()) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
     refresh().finally(() => setLoading(false));
   }, []);
 
   const login = async (p: LoginPayload) => {
-    const u = await authApi.login(p);
-    setUser(u);
+    const res = await authApi.login(p);
+    setToken(res.token);
+    setUser(res.user);
   };
 
   const register = async (p: RegisterPayload) => {
@@ -41,7 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    await authApi.logout();
+    // Stateless JWT: logout is client-side — drop the token and clear the user.
+    clearToken();
     setUser(null);
   };
 

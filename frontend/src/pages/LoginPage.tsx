@@ -8,7 +8,7 @@ import { Field } from '../components/Field';
 import { Alert } from '../components/ui';
 import './auth.css';
 
-interface FormValues { username: string; password: string; rememberMe: boolean; }
+interface FormValues { username: string; password: string; }
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -49,9 +49,6 @@ export function LoginPage() {
             <input id="password" type="password" className={`input ${errors.password ? 'invalid' : ''}`} placeholder="••••••••"
               {...register('password', { required: 'Password is required' })} />
           </Field>
-          <label className="checkbox" style={{ marginBottom: '1.2rem' }}>
-            <input type="checkbox" {...register('rememberMe')} /> Remember me
-          </label>
           <button className="btn btn-block" type="submit" disabled={isSubmitting}>
             {isSubmitting ? 'Signing in…' : 'Sign in →'}
           </button>
