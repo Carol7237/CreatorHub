@@ -29,6 +29,18 @@ spring:
         max-page-size: 100
         one-indexed-parameters: false   # page numbers are 0-based
 
+# JWT (HS256) — access-token authentication.
+# Step 1: the User Service signs an access token at /api/auth/login. The SAME secret
+# is validated by the gateway at Step 2 (symmetric key), so keep both sides in sync.
+# The default below is DEV-ONLY (documented as such, like the remember-me key) — it is
+# NOT a real secret. Externalize via the CREATORHUB_JWT_SECRET env var (or the Config
+# Server) before any real deployment. HS256 requires >= 256 bits (32+ characters).
+creatorhub:
+  jwt:
+    secret: ${CREATORHUB_JWT_SECRET:dev-only-creatorhub-jwt-signing-secret-change-me-please-0123456789}
+    # 7200s = 2 hours; when it expires the user simply logs in again (no refresh token).
+    access-token-validity-seconds: ${CREATORHUB_JWT_TTL_SECONDS:7200}
+
 server:
   # 8092: 8080 (Oracle TNS) / 8081 (monolith) / 8085 (gateway) / 8761 (eureka) are taken.
   port: 8092

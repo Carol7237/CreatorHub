@@ -1,5 +1,7 @@
 package com.creatorhub.userservice.security;
 
+import com.creatorhub.security.jwt.JwtPrincipal;
+import com.creatorhub.security.jwt.JwtService;
 import com.creatorhub.userservice.dto.LoginRequest;
 import com.creatorhub.userservice.dto.RegisterRequest;
 import com.creatorhub.userservice.dto.UserRequest;
@@ -48,6 +50,8 @@ class SecurityIntegrationTests {
     private PasswordEncoder passwordEncoder;
     @Autowired
     private UserService userService;
+    @Autowired
+    private JwtService jwtService;
 
     private void seedUser(String username, String password) {
         userService.create(UserRequest.builder()
@@ -79,14 +83,37 @@ class SecurityIntegrationTests {
     }
 
     @Test
-    @DisplayName("login: correct credentials -> 200")
+    @DisplayName("login: correct credentials -> 200 with token + Bearer + user")
     void login_correctCredentials() throws Exception {
         seedUser("login_ok", "pass12345");
         mockMvc.perform(post("/api/auth/login").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(new LoginRequest("login_ok", "pass12345", false))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.username").value("login_ok"));
+                .andExpect(jsonPath("$.token").exists())
+                .andExpect(jsonPath("$.type").value("Bearer"))
+                .andExpect(jsonPath("$.expiresIn").isNumber())
+                .andExpect(jsonPath("$.user.username").value("login_ok"))
+                .andExpect(jsonPath("$.user.password").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("login: returns a valid signed JWT carrying userId + username + roles")
+    void login_returnsValidJwt() throws Exception {
+        seedUser("jwt_user", "pass12345");
+        Long id = userRepository.findByUsername("jwt_user").orElseThrow().getId();
+
+        String body = mockMvc.perform(post("/api/auth/login").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(new LoginRequest("jwt_user", "pass12345", false))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        String token = objectMapper.readTree(body).get("token").asText();
+        JwtPrincipal principal = jwtService.parse(token);
+        assertThat(principal.userId()).isEqualTo(id);
+        assertThat(principal.username()).isEqualTo("jwt_user");
+        assertThat(principal.roles()).contains("ROLE_USER");
     }
 
     @Test

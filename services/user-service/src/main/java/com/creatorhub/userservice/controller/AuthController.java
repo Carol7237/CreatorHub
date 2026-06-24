@@ -1,11 +1,14 @@
 package com.creatorhub.userservice.controller;
 
 import com.creatorhub.common.dto.ApiErrorResponse;
+import com.creatorhub.security.jwt.JwtService;
 import com.creatorhub.userservice.dto.LoginRequest;
+import com.creatorhub.userservice.dto.LoginResponse;
 import com.creatorhub.userservice.dto.RegisterRequest;
 import com.creatorhub.userservice.dto.UserRequest;
 import com.creatorhub.userservice.dto.UserResponse;
 import com.creatorhub.userservice.model.enums.Role;
+import com.creatorhub.userservice.security.SecurityUser;
 import com.creatorhub.userservice.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
@@ -18,6 +21,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.RememberMeServices;
@@ -30,11 +34,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Authentication endpoints. Authentication is session-based but driven via REST
  * (so the React SPA consumes the same endpoints). Logout is handled by Spring
  * Security's LogoutFilter at POST /api/auth/logout.
+ *
+ * <p>JWT (Step 1, transitional): {@code /api/auth/login} ALSO issues a signed HS256
+ * access token in the response body (alongside creating the session). The session
+ * is still created because the gateway authenticates via session until Step 2; the
+ * token is additive for now. {@code /api/auth/me} stays session-based here.
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -45,6 +55,7 @@ public class AuthController {
     private final AuthenticationManager authenticationManager;
     private final SecurityContextRepository securityContextRepository;
     private final RememberMeServices rememberMeServices;
+    private final JwtService jwtService;
 
     /**
      * Returns the CSRF token so a cross-origin SPA can read it from the response
@@ -70,7 +81,12 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
-    /** Programmatic login that establishes an HTTP session (and optional remember-me cookie). */
+    /**
+     * Programmatic login. Authenticates the credentials (BCrypt, unchanged), then:
+     * (1) establishes an HTTP session (+ optional remember-me cookie) — still used by
+     * the gateway until Step 2 — and (2) issues a signed JWT access token returned in
+     * the body. Returns {@link LoginResponse} (token + Bearer type + expiresIn + user).
+     */
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request,
                                    HttpServletRequest httpRequest,
@@ -92,7 +108,20 @@ public class AuthController {
                     : httpRequest;
             rememberMeServices.loginSuccess(rememberMeRequest, httpResponse, authentication);
 
-            return ResponseEntity.ok(userService.findByUsername(authentication.getName()));
+            // Sign a JWT access token for the authenticated principal (additive in Step 1).
+            SecurityUser principal = (SecurityUser) authentication.getPrincipal();
+            List<String> roles = authentication.getAuthorities().stream()
+                    .map(GrantedAuthority::getAuthority)
+                    .toList();
+            String token = jwtService.generateAccessToken(
+                    principal.getId(), principal.getUsername(), roles);
+
+            return ResponseEntity.ok(LoginResponse.builder()
+                    .token(token)
+                    .type("Bearer")
+                    .expiresIn(jwtService.getAccessTokenValiditySeconds())
+                    .user(userService.findByUsername(authentication.getName()))
+                    .build());
         } catch (AuthenticationException ex) {
             ApiErrorResponse error = ApiErrorResponse.builder()
                     .timestamp(Instant.now())
