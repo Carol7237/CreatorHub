@@ -293,14 +293,19 @@ docker compose -f services/docker-compose.yml down       # add -v to also drop v
 
 ### Option B — the React frontend (dev)
 
-The SPA currently targets the monolith on `:8081`. Run it alongside the monolith
-(Option C) for a full UI experience:
+On this branch (`jwt-auth`) the SPA targets the **API gateway on `:8085`** (the
+microservices stack) and authenticates with a **JWT** (`Authorization: Bearer`, token
+in `localStorage`, no session/CSRF). Start the microservices stack first (Option A),
+then:
 
 ```bash
 cd frontend
 npm install
-npm run dev          # http://localhost:5173
+npm run dev          # http://localhost:5173  (Vite proxies /api -> gateway :8085)
 ```
+
+> On `main` the SPA instead targets the monolith on `:8081` with session + CSRF; the
+> JWT rewrite lives on `jwt-auth`. See the *Distributed JWT* note below.
 
 ### Option C — the monolith (single process)
 
@@ -432,8 +437,15 @@ Docker required to run the test suite.
 - **Premium gating** is enforced in the service layer (not by URL) via the resilient
   content→subscription call.
 - Credentials in this repo are **development-only** (documented dev admin, dev DB/Grafana
-  passwords). **Distributed JWT** is the planned next step (the foundation —
-  `CustomUserDetailsService` + `PasswordEncoder` — is reused unchanged).
+  passwords).
+- **Distributed JWT (delivered on `jwt-auth`):** the session + CSRF model above is the `main`
+  baseline; on the **`jwt-auth`** branch it is replaced end-to-end by **HS256 JWT** (access
+  token, 2 h, no refresh token; shared symmetric secret). The User Service signs a token at
+  login (shared pure `security-jwt` module, jjwt); the **gateway validates the `Bearer` token**
+  and injects the same `X-User-*` headers (anti-spoofing kept); downstream services are
+  unchanged; the User Service becomes **stateless** (CSRF off); the React SPA stores the token
+  and sends `Authorization: Bearer`. `CustomUserDetailsService` + `PasswordEncoder` are reused
+  unchanged. Verified end-to-end (backend tests + browser). See `JWT_PLAN.md` and CLAUDE.md §24.
 
 ---
 
@@ -514,8 +526,9 @@ The commit history reflects an incremental, phase-by-phase build (~69 commits).
 
 ## 14. Roadmap / next steps
 
-- **Distributed JWT** — replace gateway session-resolution with JWT validation (the
-  downstream header contract stays the same).
+- **Distributed JWT** — ✅ **done on the `jwt-auth` branch** (gateway validates a `Bearer`
+  token instead of resolving a session; downstream header contract unchanged; SPA on JWT).
+  Pending: fast-forward into `main`/`dev`.
 - **Redis caching** — cache premium-gating results and cross-service display data.
 - **Dynamic config refresh** — a Git/filesystem config backend + `@RefreshScope` +
   `/actuator/refresh` (or Spring Cloud Bus) for live config changes.

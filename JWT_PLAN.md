@@ -9,6 +9,12 @@
 
 ## 0. Obiectivul
 
+> ## ✅ STARE: JWT COMPLET ÎN TOT SISTEMUL (2026-06-25, ramura `jwt-auth`)
+> Toți cei **3 pași sunt LIVRAȚI și verificați** (Pasul 1 user-service emite, Pasul 2 gateway validează +
+> user-service stateless, Pasul 3 frontend pe gateway + Bearer — verificat în browser). **72 teste verzi**,
+> `npm run build` 0 erori TS. Detalii pe pași mai jos + în **`CLAUDE.md` §24**. **Rămas:** sincronizarea
+> `main`/`dev` cu `jwt-auth` (pas separat, la semnalul utilizatorului). Vezi §5.
+
 Înlocuim autentificarea **pe sesiune** (cookie `JSESSIONID` + CSRF) cu **JWT** în TOT
 sistemul de microservicii — backend ȘI frontend. Bifează cerința opțională **„Securitate
 Avansată JWT"**.
@@ -103,7 +109,15 @@ balancing, notificări, Config Server). Vezi `CLAUDE.md` §18/§22 pentru cum se
   protejat 401; token stricat/expirat → 401. **Re-confirmă gating** (fan abonat cu token →
   vede premium; anonim → locked), load balancing, notificări.
 
-### PASUL 3 — Frontend rebranșat pe gateway (8085) + JWT
+### PASUL 3 — Frontend rebranșat pe gateway (8085) + JWT ✅ COMPLET (2026-06-25)
+> Vite proxy `/api`→**8085** (gateway). Token JWT în **localStorage** (`src/auth/token.ts`).
+> Client axios: scos CSRF/`withCredentials`, interceptor **Bearer** + handling **401**→clear+`/login`.
+> AuthContext: login stochează token + user din `LoginResponse`, **logout client-side**, restaurare la
+> load doar dacă există token, register auto-login. Rute adaptate (sub-resurse creator → `?creatorId=`),
+> câmpuri display cross-service opționale + fallback pe id. **Verificat în browser** (login/gating/admin/
+> logout/refresh/register, UI intact, 0 erori, `npm run build` 0 erori TS). **JWT COMPLET în tot sistemul.**
+> **Detalii complete în `CLAUDE.md` §24 (Pasul 3).**
+
 - În `/frontend`:
   - **Vite proxy** (`vite.config.ts`): `/api` → **`http://localhost:8085`** (gateway), NU 8081.
   - **`src/api/client.ts`:** scoate interceptorul CSRF (cookie `XSRF-TOKEN`/`X-XSRF-TOKEN`);

@@ -63,26 +63,27 @@ Spring Cloud. **Ambele sunt COMPLETE.**
 >   headere `X-User-*` → **serviciile downstream NU se schimbă** (`HeaderAuthenticationFilter`
 >   se refolosește neschimbat). Vezi **`JWT_PLAN.md`**.
 >
-> ### Frontend (atenție pt JWT)
-> SPA React+TS+Vite în `/frontend` (§15): `src/api/client.ts` (axios + interceptor **CSRF**),
-> `src/auth/AuthContext.tsx` (login/register/logout **pe sesiune**). **Frontend-ul lovește
-> ACUM MONOLITUL pe `:8081`** (Vite proxy `/api`→8081), NU gateway-ul. La JWT trebuie
-> **rebranșat pe gateway (8085)** + trecut de la CSRF/sesiune la `Authorization: Bearer <jwt>`.
+> ### Frontend (JWT)
+> SPA React+TS+Vite în `/frontend` (§15): `src/api/client.ts` (axios + interceptor **Bearer**
+> + handling 401), `src/auth/token.ts` (token în **localStorage**), `src/auth/AuthContext.tsx`
+> (login stochează JWT-ul, logout **client-side**). **Frontend-ul lovește ACUM GATEWAY-ul pe
+> `:8085`** (Vite proxy `/api`→8085), nu monolitul; autentificare **`Authorization: Bearer <jwt>`**,
+> fără CSRF/sesiune. Detalii: **§24 (Pasul 3)**.
 >
-> ### Următorul pas = **JWT distribuit în TOT sistemul** (backend microservicii + frontend)
-> Planul complet, incremental, e în **[`JWT_PLAN.md`](JWT_PLAN.md)** — **citește-l înainte
-> să începi**. Se lucrează pe o **ramură NOUĂ `jwt-auth`** (din `microservices`); `main` +
-> `dev` + `microservices` rămân intacte ca backup (sistemul cu sesiune e în zona 10 — **NU-l
-> pierde**). Lecții de tooling (PowerShell etc.): **§3bis**.
+> ### JWT distribuit = **COMPLET în TOT sistemul** (backend microservicii + frontend) ✅
+> Planul incremental e în **[`JWT_PLAN.md`](JWT_PLAN.md)**. Lucrat pe ramura **`jwt-auth`** (din
+> `microservices`); `main` + `dev` + `microservices` rămân intacte ca backup (sistemul cu sesiune
+> e în zona 10). Lecții de tooling (PowerShell etc.): **§3bis**.
 >
-> **🔑 JWT — STARE (pe ramura `jwt-auth`):** Decizii: **access token HS256 cu expirare
-> (2h), FĂRĂ refresh token**; cheie simetrică partajată. **Pasul 1 = COMPLET** (user-service
-> emite JWT la login; modul nou pur `services/security-jwt` cu jjwt). **Pasul 2 = COMPLET**
-> (gateway validează `Bearer <jwt>` și injectează `X-User-*`, anti-spoofing păstrat; user-service
-> devenit **STATELESS**, CSRF/sesiune scoase, `/me` pe headere; downstream NESCHIMBAT; cheie
-> partajată în Docker). **Backend-ul rulează acum 100% pe JWT.** **Pasul 3** (frontend pe gateway
-> + Bearer) = de făcut. Detalii: **§24**. `main`/`dev`/`microservices` rămân pe sesiune până
-> JWT e validat 100% end-to-end (inclusiv frontend).
+> **🔑 JWT — STARE (pe ramura `jwt-auth`): TOATE CELE 3 PAȘI COMPLEȚI.** Decizii: **access token
+> HS256 cu expirare (2h), FĂRĂ refresh token**; cheie simetrică partajată. **Pasul 1** — user-service
+> emite JWT la login (modul nou pur `services/security-jwt` cu jjwt). **Pasul 2** — gateway validează
+> `Bearer <jwt>` și injectează `X-User-*` (anti-spoofing păstrat); user-service **STATELESS** (CSRF/sesiune
+> scoase, `/me` pe headere); downstream NESCHIMBAT. **Pasul 3** — frontend pe gateway (8085), token în
+> localStorage, `Authorization: Bearer`, fără CSRF/sesiune; **verificat în browser** (login/gating/admin/
+> logout/refresh/register). **JWT flux complet:** user-service emite → gateway validează → downstream pe
+> headere → frontend pe Bearer. Detalii: **§24**. **Rămas:** sincronizarea `main`/`dev` cu `jwt-auth`
+> (la semnalul tău) + opțional containerizarea frontend-ului.
 
 ## 2. Stack tehnologic
 
@@ -301,13 +302,14 @@ Spring Cloud: Eureka (discovery), Gateway, Config Server, Resilience4j; Redis
     servește config; proprietate definită DOAR în Config Server (`creatorhub.config-source`) e activă în
     serviciu (vizibilă prin gateway la `/api/content/instance`); gating + notificări neatinse; rularea
     locală pornește și fără Config Server (fallback). Detalii §23.
-  - [~] **JWT distribuit (pe ramura `jwt-auth`, în curs):** access token **HS256** cu expirare
-    (2h), **fără refresh token**, cheie simetrică partajată. **Pasul 1 COMPLET (2026-06-25):**
-    user-service emite JWT la login printr-un **modul nou pur `services/security-jwt`** (jjwt,
-    refolosibil de gateway). **Pasul 2 COMPLET (2026-06-25):** gateway validează `Bearer <jwt>` și
-    injectează `X-User-*` (anti-spoofing păstrat); user-service devenit **STATELESS** (CSRF/sesiune
-    scoase, `/me` pe headere); **downstream NESCHIMBAT**; cheie partajată în Docker. **Backend 100% JWT.**
-    **72 teste verzi.** Pasul 3 (frontend pe gateway + Bearer) rămâne. Detalii §24.
+  - [x] **JWT distribuit — COMPLET (pe ramura `jwt-auth`, 2026-06-25):** access token **HS256** cu
+    expirare (2h), **fără refresh token**, cheie simetrică partajată. **Pasul 1:** user-service emite JWT
+    la login (**modul nou pur `services/security-jwt`**, jjwt). **Pasul 2:** gateway validează `Bearer <jwt>`
+    și injectează `X-User-*` (anti-spoofing păstrat); user-service **STATELESS** (CSRF/sesiune scoase, `/me`
+    pe headere); **downstream NESCHIMBAT**; cheie partajată în Docker. **Pasul 3:** frontend pe gateway (8085),
+    token în localStorage, `Authorization: Bearer`, fără CSRF; **verificat în browser**. **Flux complet:**
+    user-service emite → gateway validează → downstream pe headere → frontend pe Bearer. **72 teste verzi.**
+    Detalii §24. Rămas: sincronizare `main`/`dev` (la semnal) + opțional frontend containerizat.
   - [ ] **Pasul 8+ — Redis (cache)**, containerizare frontend, deploy.
     Vezi `NEXT_STEPS.md` §5.
 
@@ -746,9 +748,15 @@ de la backend, `fieldErrors` se mapează pe câmpurile formularului (`setError`)
 401 → redirect login; 403 → mesaj "no access"; 404 → pagina 404 React.
 
 ### Rulare
-`cd frontend && npm install && npm run dev` → `http://localhost:5173` (backend pe
-dev + Docker trebuie pornite). Build: `npm run build` (0 erori TS). **Tot textul
-UI e în engleză.** Admin dev: `admin` / `admin123`.
+`cd frontend && npm install && npm run dev` → `http://localhost:5173`. Build: `npm run build`
+(0 erori TS). **Tot textul UI e în engleză.** Admin dev: `admin` / `admin123`.
+
+> **NOTĂ (ramura `jwt-auth`):** descrierea de mai sus (sesiune + CSRF + proxy pe monolit 8081) e
+> versiunea ISTORICĂ de pe `main`. Pe `jwt-auth` frontend-ul a fost rebranșat pe **gateway-ul de
+> microservicii (8085)** cu **JWT** (`Authorization: Bearer`, token în localStorage, fără CSRF/sesiune)
+> — vezi **§24 (Pasul 3)**. Ca să rulezi pe `jwt-auth`: pornește stiva de microservicii (`docker compose
+> -f services/docker-compose.yml up` SAU jar-urile local: eureka+user+subscription+content+gateway) și
+> apoi `npm run dev`; proxy-ul Vite trimite `/api` → 8085.
 
 ## 16. Microservicii — Infrastructură (Faza 8, Pasul 1)
 
@@ -1306,6 +1314,38 @@ FAN valid + `X-User-Id:1`/`ROLE_ADMIN` fals → identitatea folosită = **FAN** 
 fals pe `/api/admin/users` → **403** (rolurile vin din JWT); (8) **gating inter-service cu JWT:** anonim →
 premium **locked**, FAN abonat (Bearer) → **body vizibil**. Downstream (subscription/content) neatins.
 
+### Pasul 3 — Frontend rebranșat pe gateway + JWT (COMPLET, 2026-06-25)
+SPA-ul (`/frontend`) nu mai lovește monolitul (8081) pe sesiune — lovește **gateway-ul (8085)** cu JWT.
+
+- **Vite proxy** (`vite.config.ts`): `/api` → **`http://localhost:8085`** (gateway), nu 8081.
+- **Stocarea token-ului** (`src/auth/token.ts`): **localStorage** (`creatorhub.jwt`) — simplu, persistă peste
+  refresh. *Trade-off documentat: localStorage e citibil de JS → expus la XSS; acceptabil pt proiect (prod ar
+  folosi cookie httpOnly / in-memory).*
+- **Client axios** (`src/api/client.ts`): scos CSRF/`withCredentials`; interceptor **request** care atașează
+  `Authorization: Bearer <token>`; interceptor **response** care, la **401 cu token prezent** (expirat/invalid),
+  șterge token-ul și redirectează la `/login` (fără refresh token → re-login). 401 fără token (parolă greșită)
+  rămâne pt caller.
+- **AuthContext** (`src/auth/AuthContext.tsx`): login salvează `res.token` + `setUser(res.user)`; **logout =
+  client-side** (`clearToken()`, fără apel server); la load restaurează sesiunea DOAR dacă există token (apoi
+  `/me` confirmă); register face auto-login. **`/api/auth/logout` scos** din client (nu mai există pe backend).
+- **Divergențe de rute monolit→microservicii (adaptate):** sub-resursele per-creator s-au mutat →
+  `creatorApi.posts` apelează `GET /api/posts?creatorId=` (content), `creatorApi.tiers` → `GET /api/tiers?creatorId=`
+  (subscription). `authApi.login` întoarce acum `LoginResponse {token,type,expiresIn,user}`.
+- **Câmpuri display cross-service lipsă (cosmetic):** microserviciile nu mai întorc `creatorUsername`/
+  `authorUsername`/`fanUsername`/`tierName` (doar ID-uri — §18). Marcate opționale în `types.ts`; UI face
+  **fallback** pe id (`creator-<id>`/`user-<id>`) în `PostCard`/`PostDetailPage`. (`SubscriptionResponse.tierName`
+  e păstrat — tier-ul e local.) Scos checkbox-ul „Remember me" (localStorage persistă oricum).
+
+**Verificat ÎN BROWSER (2026-06-25, preview 5173 → proxy gateway 8085; `npm run build` 0 erori TS):**
+(1) login `admin/admin123` **fără CSRF** → token JWT (3 segmente) în localStorage, redirect; (2) toate cererile
+`/api/*` lovesc gateway-ul (200) — login/posts/creators/admin; (3) `/api/admin/users` (protejat ADMIN) se încarcă
+→ Bearer atașat + rol ADMIN din JWT; (4) **gating premium în UI:** anonim → **locked**; admin → **deblocat** (bypass
+autor/admin); fan nou (neabonat) → **locked** („Subscribe to unlock"); `fan_25258` abonat → „Premium 25258"
+**deblocat** + „Secret Post" (alt tier) **locked**; (5) **refresh** cât e logat → rămâne logat (token restaurat);
+(6) **logout** → token șters, redirect, rută protejată inaccesibilă; (7) **register** user nou → creat + auto-login
+(`ROLE_USER`); (8) **UI cyberpunk intact**, 0 erori în consolă.
+
 ### Rămas (pe `jwt-auth`)
-- **Pasul 3:** frontend rebranșat pe gateway (8085), `Authorization: Bearer`, fără CSRF/sesiune.
-- La final: docs + sincronizare `main`/`dev` cu `jwt-auth` (până atunci rămân pe sesiune).
+- **JWT e COMPLET end-to-end** (backend + frontend, verificat). Rămâne DOAR: **sincronizarea `main`/`dev` cu
+  `jwt-auth`** (pas separat, la semnalul utilizatorului — până atunci `main`/`dev`/`microservices` rămân pe sesiune
+  ca backup). Opțional ulterior: containerizarea frontend-ului în compose, Redis.
