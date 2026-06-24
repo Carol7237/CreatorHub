@@ -97,6 +97,9 @@ services:
       SPRING_DATASOURCE_PASSWORD: creatorhub
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
       CONFIG_SERVER_URL: http://config-server:8888
+      # JWT signing secret (HS256). MUST match the gateway's value below — the gateway
+      # validates the tokens this service signs (symmetric key). DEV value, externalized.
+      CREATORHUB_JWT_SECRET: creatorhub-docker-shared-jwt-secret-user-and-gateway-0123456789
     depends_on:
       postgres:
         condition: service_healthy
@@ -213,6 +216,9 @@ services:
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
       CONFIG_SERVER_URL: http://config-server:8888
+      # JWT validation secret (HS256). MUST be identical to user-service's value above
+      # (symmetric key): the gateway validates the tokens the User Service signs.
+      CREATORHUB_JWT_SECRET: creatorhub-docker-shared-jwt-secret-user-and-gateway-0123456789
     depends_on:
       eureka-server:
         condition: service_healthy
