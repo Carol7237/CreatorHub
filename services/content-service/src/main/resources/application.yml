@@ -3,6 +3,11 @@ spring:
   application:
     name: content-service
 
+  # Centralized config: import from the Config Server at startup. `optional:` means
+  # the service still starts (with local config) if the Config Server is unavailable.
+  config:
+    import: "optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}"
+
   profiles:
     active: dev
 

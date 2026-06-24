@@ -30,6 +30,14 @@ public class InstanceController {
     @Value("${server.port}")
     private int port;
 
+    /**
+     * Defined ONLY in the Config Server's centralized config-repo. If this shows the
+     * "Config Server" value, the property came from there; the default ("LOCAL ...")
+     * means the Config Server was not reachable (the import is `optional:`).
+     */
+    @Value("${creatorhub.config-source:LOCAL (config server not used)}")
+    private String configSource;
+
     @GetMapping("/instance")
     public Map<String, Object> instance() {
         Map<String, Object> body = new LinkedHashMap<>();
@@ -37,6 +45,7 @@ public class InstanceController {
         body.put("instanceId", INSTANCE_ID);
         body.put("host", hostname());
         body.put("port", port);
+        body.put("configSource", configSource);
         return body;
     }
 

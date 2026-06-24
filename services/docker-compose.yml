@@ -64,6 +64,24 @@ services:
       retries: 12
       start_period: 40s
 
+  config-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: config-server
+    image: creatorhub/config-server:0.0.1
+    container_name: creatorhub-config
+    restart: unless-stopped
+    ports:
+      - "8888:8888"            # Config Server on the host (demo: /<service>/default)
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8888/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
   user-service:
     build:
       context: .
@@ -78,10 +96,13 @@ services:
       SPRING_DATASOURCE_USERNAME: creatorhub
       SPRING_DATASOURCE_PASSWORD: creatorhub
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
     depends_on:
       postgres:
         condition: service_healthy
       eureka-server:
+        condition: service_healthy
+      config-server:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8092/actuator/health || exit 1"]
@@ -104,10 +125,13 @@ services:
       SPRING_DATASOURCE_USERNAME: creatorhub
       SPRING_DATASOURCE_PASSWORD: creatorhub
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
     depends_on:
       postgres:
         condition: service_healthy
       eureka-server:
+        condition: service_healthy
+      config-server:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8093/actuator/health || exit 1"]
@@ -133,10 +157,13 @@ services:
       SPRING_DATASOURCE_USERNAME: creatorhub
       SPRING_DATASOURCE_PASSWORD: creatorhub
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
     depends_on:
       postgres:
         condition: service_healthy
       eureka-server:
+        condition: service_healthy
+      config-server:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8094/actuator/health || exit 1"]
@@ -157,10 +184,13 @@ services:
     environment:
       SPRING_DATA_MONGODB_URI: mongodb://mongodb:27017/notifications_db
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
     depends_on:
       mongodb:
         condition: service_healthy
       eureka-server:
+        condition: service_healthy
+      config-server:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8095/actuator/health || exit 1"]
@@ -182,8 +212,11 @@ services:
       - "8085:8085"            # single entry point on the host
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
     depends_on:
       eureka-server:
+        condition: service_healthy
+      config-server:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8085/actuator/health || exit 1"]

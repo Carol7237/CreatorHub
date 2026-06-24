@@ -15,6 +15,11 @@ spring:
       ddl-auto: create-drop
     show-sql: false
 
+  # No Config Server during tests (isolated, fast).
+  cloud:
+    config:
+      enabled: false
+
 # No discovery during tests: don't try to register with or fetch from Eureka.
 eureka:
   client:
