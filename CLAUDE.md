@@ -18,12 +18,13 @@ la **calitate de producție** fiindcă va deveni un produs real.
 monolit Spring Boot curat și bine structurat, apoi l-am spart în microservicii
 Spring Cloud. **Ambele sunt COMPLETE.**
 
-> ## ⭐ STARE CURENTĂ (handoff — citește asta primul) — actualizat 2026-06-24
+> ## ⭐ STARE CURENTĂ (handoff — citește asta primul) — actualizat 2026-06-25
 >
-> **TOTUL E COMPLET ȘI FUNCȚIONAL. Working tree curat. ~70 commits, totul pe GitHub.**
-> Ramura de lucru curentă = **`microservices`**. `main` + `dev` + `microservices` sunt
-> **sincronizate** pe GitHub: <https://github.com/Carol7237/CreatorHub> (repo public,
-> `main` = proiectul complet, `dev` = ramură de lucru).
+> **TOTUL E COMPLET ȘI FUNCȚIONAL, INCLUSIV JWT. Working tree curat. Totul pe GitHub.**
+> **`main` = `dev` = versiunea cu JWT** (oficială), sincronizate pe GitHub:
+> <https://github.com/Carol7237/CreatorHub> (repo public). Versiunea anterioară **cu sesiune**
+> e păstrată ca backup explicit pe ramura **`session-auth-backup`** (pe GitHub, recuperabilă
+> oricând). Ramuri de lucru locale: `microservices` (pre-JWT) + `jwt-auth` (sursa JWT-ului).
 >
 > ### Ce e livrat
 > - **Monolitul Spring Boot** (în `src/` + root `pom.xml`, pe toate ramurile): cele 8
@@ -70,20 +71,19 @@ Spring Cloud. **Ambele sunt COMPLETE.**
 > `:8085`** (Vite proxy `/api`→8085), nu monolitul; autentificare **`Authorization: Bearer <jwt>`**,
 > fără CSRF/sesiune. Detalii: **§24 (Pasul 3)**.
 >
-> ### JWT distribuit = **COMPLET în TOT sistemul** (backend microservicii + frontend) ✅
-> Planul incremental e în **[`JWT_PLAN.md`](JWT_PLAN.md)**. Lucrat pe ramura **`jwt-auth`** (din
-> `microservices`); `main` + `dev` + `microservices` rămân intacte ca backup (sistemul cu sesiune
-> e în zona 10). Lecții de tooling (PowerShell etc.): **§3bis**.
+> ### JWT distribuit = **COMPLET în TOT sistemul + INTEGRAT ÎN `main`** ✅
+> Planul incremental e în **[`JWT_PLAN.md`](JWT_PLAN.md)**. Dezvoltat pe `jwt-auth` (din `microservices`),
+> apoi **integrat în `main` prin fast-forward curat** (2026-06-25). Versiunea cu sesiune e salvată pe
+> **`session-auth-backup`** (GitHub). Lecții de tooling (PowerShell etc.): **§3bis**.
 >
-> **🔑 JWT — STARE (pe ramura `jwt-auth`): TOATE CELE 3 PAȘI COMPLEȚI.** Decizii: **access token
-> HS256 cu expirare (2h), FĂRĂ refresh token**; cheie simetrică partajată. **Pasul 1** — user-service
-> emite JWT la login (modul nou pur `services/security-jwt` cu jjwt). **Pasul 2** — gateway validează
-> `Bearer <jwt>` și injectează `X-User-*` (anti-spoofing păstrat); user-service **STATELESS** (CSRF/sesiune
-> scoase, `/me` pe headere); downstream NESCHIMBAT. **Pasul 3** — frontend pe gateway (8085), token în
-> localStorage, `Authorization: Bearer`, fără CSRF/sesiune; **verificat în browser** (login/gating/admin/
-> logout/refresh/register). **JWT flux complet:** user-service emite → gateway validează → downstream pe
-> headere → frontend pe Bearer. Detalii: **§24**. **Rămas:** sincronizarea `main`/`dev` cu `jwt-auth`
-> (la semnalul tău) + opțional containerizarea frontend-ului.
+> **🔑 JWT — STARE: TOATE CELE 3 PAȘI COMPLEȚI, PE `main`.** Decizii: **access token HS256 cu expirare
+> (2h), FĂRĂ refresh token**; cheie simetrică partajată. **Pasul 1** — user-service emite JWT la login
+> (modul nou pur `services/security-jwt` cu jjwt). **Pasul 2** — gateway validează `Bearer <jwt>` și
+> injectează `X-User-*` (anti-spoofing păstrat); user-service **STATELESS** (CSRF/sesiune scoase, `/me` pe
+> headere); downstream NESCHIMBAT. **Pasul 3** — frontend pe gateway (8085), token în localStorage,
+> `Authorization: Bearer`, fără CSRF/sesiune; **verificat în browser** (login/gating/admin/logout/refresh/
+> register). **JWT flux complet:** user-service emite → gateway validează → downstream pe headere →
+> frontend pe Bearer. **72 teste verzi pe `main`.** Detalii: **§24**.
 
 ## 2. Stack tehnologic
 
